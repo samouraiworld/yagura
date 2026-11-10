@@ -24,6 +24,11 @@ import (
 
 const maxBodyBytes = 10 << 20
 
+// responseHeaderTimeout bounds the wait for response headers. It is also the
+// time a retry needs before the context deadline: with less, the attempt
+// would likely be cut by the deadline, which fails the whole poll.
+const responseHeaderTimeout = 30 * time.Second
+
 // MaxPages bounds paginated listings; a var so tests can lower it.
 var MaxPages = 1000
 
@@ -67,7 +72,7 @@ func New(opts Options) *Client {
 			Control: dialControl,
 		}).DialContext,
 		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second,
+		ResponseHeaderTimeout: responseHeaderTimeout,
 		MaxIdleConns:          10,
 		IdleConnTimeout:       90 * time.Second,
 		ForceAttemptHTTP2:     true,
@@ -164,8 +169,10 @@ type attempt struct {
 // GetJSON performs a GET and decodes the JSON body into out. It returns the
 // response headers. Each attempt first waits for the rate limiter; 429, 502,
 // 503, 504 and network errors are retried (see waitBefore for the pauses).
-// A limiter refusal is wrapped with ErrPollDeadline, joined with the previous
-// attempt's error when it happens before a retry.
+// When ctx has a deadline, a retry happens only if, after its pause, at least
+// responseHeaderTimeout is left for the attempt; otherwise the last attempt's
+// error is returned at once. A limiter refusal is wrapped with ErrPollDeadline,
+// joined with the previous attempt's error when it happens before a retry.
 func (c *Client) GetJSON(ctx context.Context, path string, query url.Values, out any) (http.Header, error) {
 	u := *c.base
 	u.Path = strings.TrimRight(c.base.Path, "/") + path
@@ -188,7 +195,7 @@ func (c *Client) GetJSON(ctx context.Context, path string, query url.Values, out
 			return a.header, a.err
 		}
 		wait := c.waitBefore(n, a.status, a.header, time.Now())
-		if dl, ok := ctx.Deadline(); ok && time.Now().Add(wait).After(dl) {
+		if dl, ok := ctx.Deadline(); ok && dl.Sub(time.Now().Add(wait)) < responseHeaderTimeout {
 			return a.header, a.err
 		}
 		if err := sleep(ctx, wait); err != nil {

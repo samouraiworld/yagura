@@ -412,6 +412,42 @@ func TestDeadlineShortCircuits(t *testing.T) {
 	})
 }
 
+func TestNoRetryWhenAttemptCannotFitBeforeDeadline(t *testing.T) {
+	// A 1m poller has a 48s budget. A response-header timeout at 30s leaves
+	// 17s after the 1s backoff: a second attempt would be cut by the deadline
+	// and fail the whole poll, so the timeout must stay an item error.
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 48*time.Second)
+		defer cancel()
+		timeout := fmt.Errorf("net/http: timeout awaiting response headers: %w", context.DeadlineExceeded)
+		c, ft := newTestClient(Options{Provider: "p"},
+			step{err: timeout, before: func() { time.Sleep(responseHeaderTimeout) }})
+		start := time.Now()
+		err := get(ctx, c)
+		if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "timeout awaiting response headers") {
+			t.Fatalf("err = %v, want the attempt's timeout", err)
+		}
+		if ft.requests() != 1 {
+			t.Errorf("requests = %d, want 1", ft.requests())
+		}
+		if ctx.Err() != nil {
+			t.Errorf("returned after the deadline (%v elapsed), want right after the first attempt", time.Since(start))
+		}
+	})
+	// A fast failure leaves room for a full attempt: the retry still happens.
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 48*time.Second)
+		defer cancel()
+		c, ft := newTestClient(Options{Provider: "p"}, step{code: 503}, step{code: 200})
+		if err := get(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+		if ft.requests() != 2 {
+			t.Errorf("requests = %d, want 2", ft.requests())
+		}
+	})
+}
+
 func TestCancelDuringWait(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, ft := newTestClient(Options{Provider: "p"}, step{code: 503})
@@ -500,9 +536,10 @@ func TestLimiterOutOfTimeFailsThePoll(t *testing.T) {
 
 func TestLimiterRefusalOnRetryKeepsLastError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		c, ft := newTestClient(Options{Provider: "p", RateLimit: rate.Every(10 * time.Second), Burst: 1}, step{code: 503})
-		// The 1s backoff fits in the budget, the 9s wait for a token does not.
-		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		c, ft := newTestClient(Options{Provider: "p", RateLimit: rate.Every(time.Minute), Burst: 1}, step{code: 503})
+		// The 1s backoff plus a full attempt fit in the budget, the 59s wait
+		// for a token does not.
+		ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
 		defer cancel()
 		err := get(ctx, c)
 		var se *StatusError
