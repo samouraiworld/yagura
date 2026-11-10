@@ -4,3 +4,6 @@
 .claude/docs/
 .claude/settings.local.json
 coverage.out
+/secrets/
+.env.*
+!.env.example

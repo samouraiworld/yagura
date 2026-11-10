@@ -14,6 +14,12 @@ services:
     # Example: pass a token as a Docker secret instead of an environment
     # variable. The program re-reads the file on every poll.
     #
+    # The file is mounted with its host owner and mode, and the container
+    # runs as UID 65532: make it readable by that user, for example with
+    # `chmod 0444 secrets/gandi_token` or `sudo chown 65532 secrets/gandi_token`.
+    # A 0600 file owned by your own account cannot be read. The secrets/
+    # directory is ignored by git and left out of the Docker build context.
+    #
     # environment:
     #   YAGURA_GANDI_TOKEN_FILE: /run/secrets/gandi_token
     # secrets:

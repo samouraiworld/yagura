@@ -3,3 +3,6 @@
 .env
 yagura
 dist
+secrets
+.env.*
+.superpowers
