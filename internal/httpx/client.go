@@ -51,6 +51,7 @@ type Client struct {
 	base    *url.URL
 	http    *http.Client
 	limiter *rate.Limiter
+	jitter  func() float64 // retry backoff jitter factor; tests set it to zero
 }
 
 // New builds a Client on the dial-guarded production transport.
@@ -92,6 +93,7 @@ func newClient(opts Options, base http.RoundTripper) *Client {
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
 		limiter: rate.NewLimiter(limit, burst),
+		jitter:  defaultJitter,
 	}
 }
 
@@ -147,54 +149,91 @@ func IsNotFound(err error) bool {
 	return errors.As(err, &se) && se.Code == http.StatusNotFound
 }
 
-// GetJSON performs one GET and decodes the JSON body into out. It returns the
-// response headers. Retries and rate limiting are layered on in a later task.
+// attempt is the outcome of one request. status is 0 when no response came.
+type attempt struct {
+	header http.Header
+	err    error
+	status int
+	retry  bool
+}
+
+// GetJSON performs a GET and decodes the JSON body into out. It returns the
+// response headers. Each attempt first waits for the rate limiter; 429, 502,
+// 503, 504 and network errors are retried (see waitBefore for the pauses).
 func (c *Client) GetJSON(ctx context.Context, path string, query url.Values, out any) (http.Header, error) {
 	u := *c.base
 	u.Path = strings.TrimRight(c.base.Path, "/") + path
 	u.RawQuery = query.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	target := u.String()
+
+	for n := 0; ; n++ {
+		if err := c.limiter.Wait(ctx); err != nil {
+			return nil, err
+		}
+		a := c.once(ctx, path, target, out)
+		if !a.retry || n+1 >= maxAttempts {
+			return a.header, a.err
+		}
+		wait := c.waitBefore(n, a.status, a.header, time.Now())
+		if dl, ok := ctx.Deadline(); ok && time.Now().Add(wait).After(dl) {
+			return a.header, a.err
+		}
+		if err := sleep(ctx, wait); err != nil {
+			return a.header, fmt.Errorf("GET %s: %w", path, err)
+		}
+	}
+}
+
+// once sends one request and classifies the result.
+func (c *Client) once(ctx context.Context, path, target string, out any) attempt {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
-		return nil, fmt.Errorf("GET %s: cannot build request", path)
+		return attempt{err: fmt.Errorf("GET %s: cannot build request", path)}
 	}
 	req.Header.Set("User-Agent", version.UserAgent())
 	req.Header.Set("Accept", "application/json")
 	if c.opts.Auth != nil {
 		if err := c.opts.Auth(req); err != nil {
-			return nil, fmt.Errorf("GET %s: auth: %w", path, err)
+			return attempt{err: fmt.Errorf("GET %s: auth: %w", path, err)}
 		}
 	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
 		c.count("error")
+		retry := retryableError(ctx, err)
 		// net/http wraps errors in *url.Error whose text holds the full URL,
 		// query string included. Keep only the cause.
 		var ue *url.Error
 		if errors.As(err, &ue) {
 			err = ue.Err
 		}
-		return nil, fmt.Errorf("GET %s: %w", path, err)
+		return attempt{err: fmt.Errorf("GET %s: %w", path, err), retry: retry}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	c.count(strconv.Itoa(resp.StatusCode))
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
-		return resp.Header, &StatusError{Path: path, Code: resp.StatusCode}
+		return attempt{
+			header: resp.Header,
+			err:    &StatusError{Path: path, Code: resp.StatusCode},
+			status: resp.StatusCode,
+			retry:  retryableStatus(resp.StatusCode),
+		}
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes+1))
 	if err != nil {
-		return resp.Header, fmt.Errorf("GET %s: reading body: %w", path, err)
+		return attempt{header: resp.Header, err: fmt.Errorf("GET %s: reading body: %w", path, err)}
 	}
 	if len(body) > maxBodyBytes {
-		return resp.Header, fmt.Errorf("GET %s: %w", path, ErrBodyTooLarge)
+		return attempt{header: resp.Header, err: fmt.Errorf("GET %s: %w", path, ErrBodyTooLarge)}
 	}
 	if err := json.NewDecoder(bytes.NewReader(body)).Decode(out); err != nil {
-		return resp.Header, fmt.Errorf("GET %s: %w: %v", path, ErrDecode, err)
+		return attempt{header: resp.Header, err: fmt.Errorf("GET %s: %w: %v", path, ErrDecode, err)}
 	}
-	return resp.Header, nil
+	return attempt{header: resp.Header}
 }
 
 func (c *Client) count(code string) {

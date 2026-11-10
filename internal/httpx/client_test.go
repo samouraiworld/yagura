@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"testing/synctest"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
@@ -176,13 +177,15 @@ func TestTransportErrorHidesQueryAndCounts(t *testing.T) {
 }
 
 func TestTransportErrorWithURLInMessage(t *testing.T) {
-	c := newClient(Options{Provider: "p", BaseURL: "https://example.com"},
-		failingTransport{err: errors.New("dial failed")})
-	var out any
-	_, err := c.GetJSON(t.Context(), "/v1/x", url.Values{"token": {"secret"}}, &out)
-	if err == nil || strings.Contains(err.Error(), "secret") {
-		t.Errorf("err = %v", err)
-	}
+	synctest.Test(t, func(t *testing.T) { // network errors are retried; keep the waits virtual
+		c := newClient(Options{Provider: "p", BaseURL: "https://example.com"},
+			failingTransport{err: errors.New("dial failed")})
+		var out any
+		_, err := c.GetJSON(t.Context(), "/v1/x", url.Values{"token": {"secret"}}, &out)
+		if err == nil || strings.Contains(err.Error(), "secret") {
+			t.Errorf("err = %v", err)
+		}
+	})
 }
 
 func TestRedirectIsNotFollowed(t *testing.T) {
