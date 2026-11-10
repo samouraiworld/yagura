@@ -155,25 +155,27 @@ type failingTransport struct{ err error }
 func (f failingTransport) RoundTrip(*http.Request) (*http.Response, error) { return nil, f.err }
 
 func TestTransportErrorHidesQueryAndCounts(t *testing.T) {
-	counter := NewRequestsCounter()
-	c := newClient(Options{Provider: "p", BaseURL: "https://example.com", Requests: counter, Auth: BearerAuth(tokenFn("hunter2"))},
-		failingTransport{err: context.DeadlineExceeded})
-	var out any
-	_, err := c.GetJSON(t.Context(), "/v1/x", url.Values{"token": {"secret"}}, &out)
-	if err == nil {
-		t.Fatal("want error")
-	}
-	for _, leak := range []string{"secret", "token=", "hunter2", "?"} {
-		if strings.Contains(err.Error(), leak) {
-			t.Errorf("error %q leaks %q", err, leak)
+	synctest.Test(t, func(t *testing.T) { // transport timeouts are retried; keep the waits virtual
+		counter := NewRequestsCounter()
+		c := newClient(Options{Provider: "p", BaseURL: "https://example.com", Requests: counter, Auth: BearerAuth(tokenFn("hunter2"))},
+			failingTransport{err: context.DeadlineExceeded})
+		var out any
+		_, err := c.GetJSON(t.Context(), "/v1/x", url.Values{"token": {"secret"}}, &out)
+		if err == nil {
+			t.Fatal("want error")
 		}
-	}
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("errors.Is lost the cause: %v", err)
-	}
-	if v := testutil.ToFloat64(counter.WithLabelValues("p", "error")); v != 1 {
-		t.Errorf("error count = %v", v)
-	}
+		for _, leak := range []string{"secret", "token=", "hunter2", "?"} {
+			if strings.Contains(err.Error(), leak) {
+				t.Errorf("error %q leaks %q", err, leak)
+			}
+		}
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("errors.Is lost the cause: %v", err)
+		}
+		if v := testutil.ToFloat64(counter.WithLabelValues("p", "error")); v != maxAttempts {
+			t.Errorf("error count = %v, want %d (one per attempt)", v, maxAttempts)
+		}
+	})
 }
 
 func TestTransportErrorWithURLInMessage(t *testing.T) {

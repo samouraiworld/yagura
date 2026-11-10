@@ -225,7 +225,11 @@ func (c *Client) once(ctx context.Context, path, target string, out any) attempt
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes+1))
 	if err != nil {
-		return attempt{header: resp.Header, err: fmt.Errorf("GET %s: reading body: %w", path, err)}
+		return attempt{
+			header: resp.Header,
+			err:    fmt.Errorf("GET %s: reading body: %w", path, err),
+			retry:  retryableError(ctx, err),
+		}
 	}
 	if len(body) > maxBodyBytes {
 		return attempt{header: resp.Header, err: fmt.Errorf("GET %s: %w", path, ErrBodyTooLarge)}

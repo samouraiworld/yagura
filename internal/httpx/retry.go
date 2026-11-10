@@ -79,14 +79,18 @@ func retryableStatus(code int) bool {
 	return false
 }
 
-// retryableError reports whether a transport error may be retried. Context
-// errors and guard refusals are final.
+// retryableError reports whether a transport or body-read error may be
+// retried. It is a network error worth another attempt while the caller's
+// context is alive, timeouts included: since Go 1.23 transport timeouts match
+// context.DeadlineExceeded, so only ctx tells whether the caller gave up.
+// Guard refusals, oversized or undecodable bodies and auth errors are final.
 func retryableError(ctx context.Context, err error) bool {
 	return ctx.Err() == nil &&
-		!errors.Is(err, context.Canceled) &&
-		!errors.Is(err, context.DeadlineExceeded) &&
 		!errors.Is(err, errDialBlocked) &&
-		!errors.Is(err, ErrMethodNotAllowed)
+		!errors.Is(err, ErrMethodNotAllowed) &&
+		!errors.Is(err, ErrBodyTooLarge) &&
+		!errors.Is(err, ErrDecode) &&
+		!IsAuthError(err)
 }
 
 // waitBefore returns the pause before the next attempt. attempt is the

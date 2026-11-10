@@ -3,6 +3,7 @@ package httpx
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -18,9 +19,26 @@ import (
 
 // step is one scripted answer of fakeTransport.
 type step struct {
-	code   int
-	header http.Header
-	err    error
+	code    int
+	header  http.Header
+	err     error
+	bodyErr error  // when set, the body breaks with this error after a few bytes
+	before  func() // when set, runs before the step answers
+}
+
+// brokenBody yields a truncated JSON document, then fails like a reset
+// connection would.
+type brokenBody struct {
+	r   io.Reader
+	err error
+}
+
+func (b *brokenBody) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	if err == io.EOF {
+		return n, b.err
+	}
+	return n, err
 }
 
 // fakeTransport answers from a script without any socket, so that virtual
@@ -37,6 +55,9 @@ func (f *fakeTransport) RoundTrip(*http.Request) (*http.Response, error) {
 	i := min(len(f.times), len(f.steps)-1)
 	f.times = append(f.times, time.Now())
 	s := f.steps[i]
+	if s.before != nil {
+		s.before()
+	}
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -44,10 +65,14 @@ func (f *fakeTransport) RoundTrip(*http.Request) (*http.Response, error) {
 	if h == nil {
 		h = http.Header{}
 	}
+	var body io.Reader = strings.NewReader(`{"ok":true}`)
+	if s.bodyErr != nil {
+		body = &brokenBody{r: strings.NewReader(`{"ok":`), err: s.bodyErr}
+	}
 	return &http.Response{
 		StatusCode: s.code,
 		Header:     h,
-		Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+		Body:       io.NopCloser(body),
 	}, nil
 }
 
@@ -96,6 +121,71 @@ func TestRetryOnNetworkError(t *testing.T) {
 	})
 }
 
+func TestRetryOnTransportTimeout(t *testing.T) {
+	// Since Go 1.23 transport timeouts match context.DeadlineExceeded; with
+	// the caller's context alive they are network errors and are retried.
+	synctest.Test(t, func(t *testing.T) {
+		c, ft := newTestClient(Options{Provider: "p"},
+			step{err: fmt.Errorf("net/http: timeout awaiting response headers: %w", context.DeadlineExceeded)},
+			step{code: 200})
+		if err := get(t.Context(), c); err != nil {
+			t.Fatal(err)
+		}
+		if ft.requests() != 2 {
+			t.Errorf("requests = %d, want 2", ft.requests())
+		}
+	})
+}
+
+func TestRetryOnBodyReadError(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, ft := newTestClient(Options{Provider: "p"},
+			step{code: 200, bodyErr: errors.New("connection reset by peer")},
+			step{code: 200})
+		var out struct{ OK bool }
+		if _, err := c.GetJSON(t.Context(), "/v1/x", nil, &out); err != nil {
+			t.Fatal(err)
+		}
+		if !out.OK {
+			t.Error("body of the second attempt was not decoded")
+		}
+		if ft.requests() != 2 {
+			t.Errorf("requests = %d, want 2", ft.requests())
+		}
+	})
+}
+
+func TestNoRetryWhenCallerContextEnds(t *testing.T) {
+	// The caller's own context ends while the request is in flight.
+	t.Run("canceled", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			c, ft := newTestClient(Options{Provider: "p"}, step{err: context.Canceled, before: cancel})
+			if err := get(ctx, c); !errors.Is(err, context.Canceled) {
+				t.Fatalf("err = %v, want context.Canceled", err)
+			}
+			if ft.requests() != 1 {
+				t.Errorf("requests = %d, want 1", ft.requests())
+			}
+		})
+	})
+	t.Run("deadline", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			c, ft := newTestClient(Options{Provider: "p"},
+				step{err: context.DeadlineExceeded, before: func() { time.Sleep(2 * time.Second) }})
+			if err := get(ctx, c); !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("err = %v, want context.DeadlineExceeded", err)
+			}
+			if ft.requests() != 1 {
+				t.Errorf("requests = %d, want 1", ft.requests())
+			}
+		})
+	})
+}
+
 func TestNoRetryOn401And404(t *testing.T) {
 	for _, code := range []int{401, 404, 403, 500} {
 		synctest.Test(t, func(t *testing.T) {
@@ -118,8 +208,6 @@ func TestNoRetryOnNonRetryableErrors(t *testing.T) {
 		opts Options
 		none bool // the request is never sent
 	}{
-		"canceled":  {step: step{err: context.Canceled}},
-		"deadline":  {step: step{err: context.DeadlineExceeded}},
 		"dial":      {step: step{err: errDialBlocked}},
 		"not GET":   {step: step{err: ErrMethodNotAllowed}},
 		"bad JSON":  {step: step{code: 200, header: http.Header{}}},
