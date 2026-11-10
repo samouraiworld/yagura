@@ -2,6 +2,8 @@ package httpx
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"math/rand/v2"
 	"net/http"
@@ -83,14 +85,29 @@ func retryableStatus(code int) bool {
 // retried. It is a network error worth another attempt while the caller's
 // context is alive, timeouts included: since Go 1.23 transport timeouts match
 // context.DeadlineExceeded, so only ctx tells whether the caller gave up.
-// Guard refusals, oversized or undecodable bodies and auth errors are final.
+// Guard refusals, oversized or undecodable bodies, auth errors and TLS
+// certificate errors are final.
 func retryableError(ctx context.Context, err error) bool {
 	return ctx.Err() == nil &&
 		!errors.Is(err, errDialBlocked) &&
 		!errors.Is(err, ErrMethodNotAllowed) &&
 		!errors.Is(err, ErrBodyTooLarge) &&
 		!errors.Is(err, ErrDecode) &&
-		!IsAuthError(err)
+		!IsAuthError(err) &&
+		!isCertificateError(err)
+}
+
+// isCertificateError reports a TLS certificate that failed verification; the
+// same certificate fails again on every attempt.
+func isCertificateError(err error) bool {
+	var (
+		verification *tls.CertificateVerificationError
+		authority    x509.UnknownAuthorityError
+		hostname     x509.HostnameError
+		invalid      x509.CertificateInvalidError
+	)
+	return errors.As(err, &verification) || errors.As(err, &authority) ||
+		errors.As(err, &hostname) || errors.As(err, &invalid)
 }
 
 // waitBefore returns the pause before the next attempt. attempt is the

@@ -2,6 +2,8 @@ package httpx
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -232,6 +234,29 @@ func TestNoRetryOnNonRetryableErrors(t *testing.T) {
 				}
 				if ft.requests() != want {
 					t.Errorf("requests = %d, want %d", ft.requests(), want)
+				}
+			})
+		})
+	}
+}
+
+func TestNoRetryOnCertificateErrors(t *testing.T) {
+	// A certificate that fails verification fails the same way on every attempt.
+	for name, cause := range map[string]error{
+		"unknown authority": x509.UnknownAuthorityError{},
+		"hostname":          x509.HostnameError{Certificate: &x509.Certificate{}, Host: "api.example.com"},
+		"invalid":           x509.CertificateInvalidError{Reason: x509.Expired},
+		"verification":      &tls.CertificateVerificationError{Err: errors.New("bad chain")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				c, ft := newTestClient(Options{Provider: "p"},
+					step{err: fmt.Errorf("tls: failed to verify certificate: %w", cause)}, step{code: 200})
+				if err := get(t.Context(), c); err == nil {
+					t.Fatal("want error")
+				}
+				if ft.requests() != 1 {
+					t.Errorf("requests = %d, want 1", ft.requests())
 				}
 			})
 		})
