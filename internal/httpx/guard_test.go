@@ -6,7 +6,9 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -112,5 +114,31 @@ func TestNewPutsGetGuardInFrontOfTransport(t *testing.T) {
 		if !errors.Is(err, ErrMethodNotAllowed) {
 			t.Errorf("%s: err = %v, want ErrMethodNotAllowed", method, err)
 		}
+	}
+}
+
+func TestDialGuardBypassesProxy(t *testing.T) {
+	// With a loopback proxy the guard would only see the proxy's address.
+	// http.ProxyFromEnvironment reads the environment once per process, so
+	// the check runs in a fresh test process that has the proxy variables.
+	if os.Getenv("YAGURA_TEST_PROXY_CHILD") == "1" {
+		c := New(Options{Provider: "p", BaseURL: "http://192.0.2.1:9"})
+		var out any
+		_, err := c.GetJSON(t.Context(), "/x", nil, &out)
+		if !errors.Is(err, errDialBlocked) {
+			t.Fatalf("err = %v, want errDialBlocked", err)
+		}
+		return
+	}
+	for _, name := range []string{"HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"} {
+		t.Setenv(name, "http://127.0.0.1:1")
+	}
+	t.Setenv("NO_PROXY", "")
+	t.Setenv("no_proxy", "")
+	t.Setenv("YAGURA_TEST_PROXY_CHILD", "1")
+	//nolint:gosec // G204: re-runs this test binary with a fixed test name
+	out, err := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestDialGuardBypassesProxy$", "-test.v").CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "--- PASS: TestDialGuardBypassesProxy") {
+		t.Fatalf("child test failed: %v\n%s", err, out)
 	}
 }

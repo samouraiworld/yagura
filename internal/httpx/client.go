@@ -61,7 +61,7 @@ type Client struct {
 // New builds a Client on the dial-guarded production transport.
 func New(opts Options) *Client {
 	return newClient(opts, &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
+		Proxy: proxyUnlessGuarded,
 		DialContext: (&net.Dialer{
 			Timeout: 10 * time.Second,
 			Control: dialControl,

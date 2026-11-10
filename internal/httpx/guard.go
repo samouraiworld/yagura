@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"sync/atomic"
 	"syscall"
 )
@@ -53,6 +54,17 @@ func LoopbackOnly(address string) error {
 		return fmt.Errorf("%w: %q is not a loopback address", errDialBlocked, address)
 	}
 	return nil
+}
+
+// proxyUnlessGuarded is the transport's Proxy func. While a dial guard is
+// installed (tests) it never uses a proxy: the guard would only see the
+// proxy's address, so a loopback proxy could reach any host. Otherwise it
+// follows HTTP_PROXY, HTTPS_PROXY and NO_PROXY.
+func proxyUnlessGuarded(req *http.Request) (*url.URL, error) {
+	if dialGuard.Load() != nil {
+		return nil, nil
+	}
+	return http.ProxyFromEnvironment(req)
 }
 
 // dialControl is used as net.Dialer.Control; address is already resolved.
