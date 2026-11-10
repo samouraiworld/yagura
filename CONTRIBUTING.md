@@ -37,6 +37,12 @@ regex = '''(?i)example-corp'''
 
 Install the hooks with `pre-commit install`.
 
+## Releases
+
+A `v<version>` tag publishes only after CI passes on the tagged commit and that
+commit is on `main`. Maintainers should protect `v*` tags in the repository
+settings (a tag ruleset) so that only they can create them.
+
 ## Adding a provider
 
 - [ ] Package `internal/<provider>` implementing the poller contract

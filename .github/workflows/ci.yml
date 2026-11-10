@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call: # release.yml runs CI on the tagged commit before publishing
 
 permissions:
   contents: read
