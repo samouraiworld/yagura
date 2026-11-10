@@ -1,0 +1,25 @@
+services:
+  yagura:
+    image: ghcr.io/samourai-crew/yagura:latest
+    build: .
+    env_file: .env
+    ports:
+      - "10100:10100"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    # Example: pass a token as a Docker secret instead of an environment
+    # variable. The program re-reads the file on every poll.
+    #
+    # environment:
+    #   YAGURA_GANDI_TOKEN_FILE: /run/secrets/gandi_token
+    # secrets:
+    #   - gandi_token
+    #
+    # Top-level section:
+    # secrets:
+    #   gandi_token:
+    #     file: ./secrets/gandi_token
