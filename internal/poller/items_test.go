@@ -3,6 +3,7 @@ package poller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -129,5 +130,27 @@ func TestRunItemsConcurrencyBound(t *testing.T) {
 	}
 	if maxSeen != limit {
 		t.Errorf("max in flight = %d, want exactly %d", maxSeen, limit)
+	}
+}
+
+func TestRunItemsItemTimeoutIsItemError(t *testing.T) {
+	// Since Go 1.23 transport timeouts match context.DeadlineExceeded. While
+	// the run context is alive such an error belongs to one item only.
+	items := []string{"slow", "ok"}
+	fn := func(_ context.Context, it string) ([]prometheus.Metric, error) {
+		if it == "slow" {
+			return nil, fmt.Errorf("GET /slow: %w", context.DeadlineExceeded)
+		}
+		return []prometheus.Metric{metric(t, "ok")}, nil
+	}
+	ms, itemErrors, err := RunItems(context.Background(), items, fn)
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if itemErrors != 1 {
+		t.Errorf("itemErrors = %d, want 1", itemErrors)
+	}
+	if len(ms) != 1 {
+		t.Errorf("got %d metrics, want 1", len(ms))
 	}
 }
