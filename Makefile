@@ -13,8 +13,8 @@ lint:
 	test -z "$$(gofmt -l .)" && go vet ./... && $(GOLANGCI_LINT) run
 
 rules:
-	docker run --rm -v $(PWD)/alerts:/alerts --entrypoint promtool $(PROMTOOL_IMAGE) check rules /alerts/*.yml
-	docker run --rm -v $(PWD)/alerts:/alerts --entrypoint promtool $(PROMTOOL_IMAGE) test rules /alerts/tests/*.yml
+	docker run --rm -v $(PWD)/alerts:/alerts --entrypoint sh $(PROMTOOL_IMAGE) -c 'promtool check rules /alerts/*.yml'
+	docker run --rm -v $(PWD)/alerts:/alerts --entrypoint sh $(PROMTOOL_IMAGE) -c 'promtool test rules /alerts/tests/*.yml'
 
 docker:
 	docker build -t yagura:dev .

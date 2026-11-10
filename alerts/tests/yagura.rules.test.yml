@@ -1,0 +1,59 @@
+rule_files:
+  - ../yagura.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      # Down for 10 minutes: fires after the 5m "for".
+      - series: 'up{job="yagura", instance="demo-1.example.com:10100"}'
+        values: '0x10'
+      # Down for only 3 minutes then back up: never fires.
+      - series: 'up{job="yagura", instance="demo-2.example.com:10100"}'
+        values: '0 0 0 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: YaguraExporterDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: yagura
+              instance: demo-1.example.com:10100
+            exp_annotations:
+              summary: "yagura exporter demo-1.example.com:10100 is down"
+              description: "Prometheus has not been able to scrape demo-1.example.com:10100 for 5 minutes."
+
+  - interval: 1m
+    input_series:
+      - series: 'yagura_collector_up{collector="demo_failing"}'
+        values: '0x30'
+      - series: 'yagura_collector_up{collector="demo_flapping"}'
+        values: '0x5 1x25'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: YaguraCollectorFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              collector: demo_failing
+            exp_annotations:
+              summary: "yagura collector demo_failing is failing"
+              description: "The last poll of collector demo_failing failed and has kept failing for 15 minutes. Check the exporter logs and the provider token."
+
+  - interval: 1m
+    input_series:
+      - series: 'yagura_collector_last_item_errors{collector="demo_items"}'
+        values: '2x60'
+      - series: 'yagura_collector_last_item_errors{collector="demo_brief"}'
+        values: '1x10 0x50'
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: YaguraCollectorPartialFailure
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              collector: demo_items
+            exp_annotations:
+              summary: "yagura collector demo_items skips items"
+              description: "2 item(s) failed or were skipped in the last successful poll of collector demo_items."
