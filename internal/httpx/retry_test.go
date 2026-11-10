@@ -442,13 +442,17 @@ func TestRateLimiterSpacesRequests(t *testing.T) {
 	})
 }
 
-func TestLimiterErrorReturnedAsIs(t *testing.T) {
+func TestLimiterErrorKeepsContextCause(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, ft := newTestClient(Options{Provider: "p", RateLimit: rate.Limit(1), Burst: 1}, step{code: 200})
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		if err := get(ctx, c); !errors.Is(err, context.Canceled) {
-			t.Errorf("err = %v", err)
+		err := get(ctx, c)
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err = %v, want context.Canceled kept", err)
+		}
+		if !errors.Is(err, ErrPollDeadline) {
+			t.Errorf("err = %v, want ErrPollDeadline", err)
 		}
 		if ft.requests() != 0 {
 			t.Errorf("requests = %d, want 0", ft.requests())
@@ -473,4 +477,43 @@ func TestEveryAttemptIsCounted(t *testing.T) {
 
 func counterValue(cv *prometheus.CounterVec, labels ...string) float64 {
 	return testutil.ToFloat64(cv.WithLabelValues(labels...))
+}
+
+func TestLimiterOutOfTimeFailsThePoll(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, ft := newTestClient(Options{Provider: "p", RateLimit: rate.Every(time.Minute), Burst: 1}, step{code: 200})
+		if err := get(t.Context(), c); err != nil {
+			t.Fatal(err)
+		}
+		// The next token comes in a minute; the context ends before that.
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		err := get(ctx, c)
+		if !errors.Is(err, ErrPollDeadline) {
+			t.Fatalf("err = %v, want ErrPollDeadline", err)
+		}
+		if ft.requests() != 1 {
+			t.Errorf("requests = %d, want 1", ft.requests())
+		}
+	})
+}
+
+func TestLimiterRefusalOnRetryKeepsLastError(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, ft := newTestClient(Options{Provider: "p", RateLimit: rate.Every(10 * time.Second), Burst: 1}, step{code: 503})
+		// The 1s backoff fits in the budget, the 9s wait for a token does not.
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		err := get(ctx, c)
+		var se *StatusError
+		if !errors.As(err, &se) || se.Code != 503 {
+			t.Errorf("err = %v, want the 503 kept", err)
+		}
+		if !errors.Is(err, ErrPollDeadline) {
+			t.Errorf("err = %v, want ErrPollDeadline", err)
+		}
+		if ft.requests() != 1 {
+			t.Errorf("requests = %d, want 1", ft.requests())
+		}
+	})
 }

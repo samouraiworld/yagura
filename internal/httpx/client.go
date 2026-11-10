@@ -32,6 +32,10 @@ var (
 	ErrDecode = errors.New("httpx: cannot decode JSON response")
 	// ErrBodyTooLarge is returned when a response exceeds the 10 MiB limit.
 	ErrBodyTooLarge = errors.New("httpx: response body too large")
+	// ErrPollDeadline wraps a refusal of the rate limiter: waiting for the
+	// next request slot would pass the context deadline, or the context
+	// ended during the wait. It fails the whole poll.
+	ErrPollDeadline = errors.New("not enough time left before the poll deadline")
 )
 
 // Options configures a Client.
@@ -160,17 +164,26 @@ type attempt struct {
 // GetJSON performs a GET and decodes the JSON body into out. It returns the
 // response headers. Each attempt first waits for the rate limiter; 429, 502,
 // 503, 504 and network errors are retried (see waitBefore for the pauses).
+// A limiter refusal is wrapped with ErrPollDeadline, joined with the previous
+// attempt's error when it happens before a retry.
 func (c *Client) GetJSON(ctx context.Context, path string, query url.Values, out any) (http.Header, error) {
 	u := *c.base
 	u.Path = strings.TrimRight(c.base.Path, "/") + path
 	u.RawQuery = query.Encode()
 	target := u.String()
 
+	var a attempt
 	for n := 0; ; n++ {
 		if err := c.limiter.Wait(ctx); err != nil {
+			// Both %w keep errors.Is(err, context.Canceled/DeadlineExceeded)
+			// true when the context was the cause.
+			err = fmt.Errorf("GET %s: %w: %w", path, ErrPollDeadline, err)
+			if n > 0 {
+				return a.header, errors.Join(a.err, err)
+			}
 			return nil, err
 		}
-		a := c.once(ctx, path, target, out)
+		a = c.once(ctx, path, target, out)
 		if !a.retry || n+1 >= maxAttempts {
 			return a.header, a.err
 		}

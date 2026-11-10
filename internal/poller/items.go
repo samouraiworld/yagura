@@ -2,6 +2,7 @@ package poller
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -14,8 +15,9 @@ const itemConcurrency = 4
 
 // RunItems calls fn for each item with a concurrency of 4. Metrics returned by
 // fn are kept even when fn also returns an error. Errors are classified as
-// follows: an auth error (401/403), or any error once ctx is done, stops the
-// run and is returned, which fails the poll; a 404 drops the item silently;
+// follows: an auth error (401/403), an httpx.ErrPollDeadline (the rate
+// limiter has no time left), or any error once ctx is done, stops the run and
+// is returned, which fails the poll; a 404 drops the item silently;
 // any other error counts as an item error, including an item timeout while
 // ctx is still alive. After a fatal error no new item is started
 // and RunItems waits for the in-flight ones. The order of the returned
@@ -38,7 +40,7 @@ func RunItems[T any](ctx context.Context, items []T, fn func(context.Context, T)
 		case err == nil, httpx.IsNotFound(err):
 		case fatal != nil:
 			// Already failing; errors from cancelled siblings do not count.
-		case httpx.IsAuthError(err):
+		case httpx.IsAuthError(err), errors.Is(err, httpx.ErrPollDeadline):
 			fatal = err
 			cancel()
 		case ctx.Err() != nil:

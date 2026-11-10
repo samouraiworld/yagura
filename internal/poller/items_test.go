@@ -154,3 +154,22 @@ func TestRunItemsItemTimeoutIsItemError(t *testing.T) {
 		t.Errorf("got %d metrics, want 1", len(ms))
 	}
 }
+
+func TestRunItemsPollDeadlineFails(t *testing.T) {
+	// The rate limiter refusing for lack of time must fail the poll, not
+	// replace a full snapshot with a partial one.
+	items := []string{"ok", "late"}
+	fn := func(_ context.Context, it string) ([]prometheus.Metric, error) {
+		if it == "late" {
+			return nil, fmt.Errorf("GET /late: %w", httpx.ErrPollDeadline)
+		}
+		return []prometheus.Metric{metric(t, "ok")}, nil
+	}
+	_, itemErrors, err := RunItems(context.Background(), items, fn)
+	if !errors.Is(err, httpx.ErrPollDeadline) {
+		t.Fatalf("err = %v, want ErrPollDeadline", err)
+	}
+	if itemErrors != 0 {
+		t.Errorf("itemErrors = %d, want 0", itemErrors)
+	}
+}
