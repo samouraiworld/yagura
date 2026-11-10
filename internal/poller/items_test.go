@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -152,6 +153,35 @@ func TestRunItemsItemTimeoutIsItemError(t *testing.T) {
 	}
 	if len(ms) != 1 {
 		t.Errorf("got %d metrics, want 1", len(ms))
+	}
+}
+
+func TestRunItemsPanicFailsThePoll(t *testing.T) {
+	// A panic on a worker goroutine is out of reach of the scheduler's
+	// recover: RunItems must turn it into a fatal error, not crash the process.
+	items := []int{1, 2, 3, 4, 5, 6, 7, 8}
+	var started, finished atomic.Int32
+	fn := func(ctx context.Context, it int) ([]prometheus.Metric, error) {
+		started.Add(1)
+		defer finished.Add(1)
+		if it == 1 {
+			panic("kaboom")
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	_, itemErrors, err := RunItems(context.Background(), items, fn)
+	if err == nil || !strings.Contains(err.Error(), "item panicked: kaboom") {
+		t.Fatalf("err = %v, want the item panic", err)
+	}
+	if itemErrors != 0 {
+		t.Errorf("itemErrors = %d, want 0", itemErrors)
+	}
+	if s, f := started.Load(), finished.Load(); s != f {
+		t.Errorf("%d items started, %d finished: workers leaked", s, f)
+	}
+	if n := started.Load(); n > 4 {
+		t.Errorf("%d items started, want at most 4 (no new items after the panic)", n)
 	}
 }
 

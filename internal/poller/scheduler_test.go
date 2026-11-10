@@ -326,7 +326,8 @@ yagura_collector_polls_total{collector="x",result="error"} 1
 yagura_collector_polls_total{collector="x",result="success"} 0
 `, "yagura_collector_up", "yagura_collector_polls_total")
 		out := logs.String()
-		for _, want := range []string{"level=ERROR", "collector=x", "poller x panicked: kaboom"} {
+		for _, want := range []string{"level=ERROR", "collector=x", "poller x panicked: kaboom",
+			"stack=", "panicPoller).Poll"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("log %q lacks %q", out, want)
 			}
@@ -345,5 +346,47 @@ yagura_collector_polls_total{collector="x",result="success"} 1
 `, "m", "yagura_collector_polls_total")
 		cancel()
 		<-done
+	})
+}
+
+// itemPanicPoller fans out with RunItems; one item panics on every poll.
+type itemPanicPoller struct{}
+
+func (itemPanicPoller) Name() string            { return "x" }
+func (itemPanicPoller) Interval() time.Duration { return time.Hour }
+
+func (itemPanicPoller) Poll(ctx context.Context) (Result, error) {
+	ms, n, err := RunItems(ctx, []int{1, 2}, func(_ context.Context, it int) ([]prometheus.Metric, error) {
+		if it == 2 {
+			panic("kaboom")
+		}
+		return nil, nil
+	})
+	return Result{Metrics: ms, ItemErrors: n}, err
+}
+
+func TestSchedulerSurvivesItemPanic(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var logs lockedBuffer
+		s := NewScheduler(slog.New(slog.NewTextHandler(&logs, nil)),
+			func() time.Duration { return 0 }, itemPanicPoller{})
+		cancel, done := runScheduler(s)
+		defer func() { cancel(); <-done }()
+		synctest.Wait()
+		expect(t, s, `# HELP yagura_collector_up 1 if the last poll succeeded, else 0.
+# TYPE yagura_collector_up gauge
+yagura_collector_up{collector="x"} 0
+# HELP yagura_collector_polls_total Poll attempts.
+# TYPE yagura_collector_polls_total counter
+yagura_collector_polls_total{collector="x",result="error"} 1
+yagura_collector_polls_total{collector="x",result="success"} 0
+`, "yagura_collector_up", "yagura_collector_polls_total")
+		out := logs.String()
+		for _, want := range []string{"level=ERROR", "collector=x", "item panicked: kaboom",
+			"stack=", "itemPanicPoller.Poll"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("log %q lacks %q", out, want)
+			}
+		}
 	})
 }
