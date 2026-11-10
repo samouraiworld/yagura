@@ -12,8 +12,9 @@ Only the latest minor release receives security fixes.
 
 ## Scope
 
-Yagura is read-only by design: its HTTP client can only issue `GET` requests,
-and the exporter never changes anything at a provider. Reports about token
-handling are in scope, for example a secret leaking into logs, metrics, error
-messages or the landing page. Secrets are read from environment variables or
-`*_FILE` paths and must never appear in output.
+Yagura is read-only by design: only `GET` requests are sent to provider APIs,
+and the exporter never changes anything at a provider. When an HTTPS proxy is
+configured, the transport opens a `CONNECT` tunnel to that proxy. Reports
+about token handling are in scope, for example a secret leaking into logs,
+metrics, error messages or the landing page. Secrets are read from environment
+variables or `*_FILE` paths and must never appear in output.
