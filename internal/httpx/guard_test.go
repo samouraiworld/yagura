@@ -3,7 +3,11 @@ package httpx
 import (
 	"errors"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
+	"slices"
+	"sync"
 	"testing"
 )
 
@@ -56,7 +60,57 @@ func TestLoopbackOnly(t *testing.T) {
 func TestDialGuardBlocksNonLoopback(t *testing.T) {
 	c := New(Options{Provider: "p", BaseURL: "http://192.0.2.1:9"})
 	var out any
-	if _, err := c.GetJSON(t.Context(), "/x", nil, &out); err == nil {
-		t.Fatal("want dial guard error")
+	_, err := c.GetJSON(t.Context(), "/x", url.Values{"token": {"secret"}}, &out)
+	if !errors.Is(err, errDialBlocked) {
+		t.Fatalf("err = %v, want errDialBlocked", err)
+	}
+}
+
+func TestDialGuardIsWiredIntoTransport(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	var mu sync.Mutex
+	var seen []string
+	SetDialGuard(func(address string) error {
+		mu.Lock()
+		seen = append(seen, address)
+		mu.Unlock()
+		return LoopbackOnly(address)
+	})
+	defer SetDialGuard(LoopbackOnly)
+
+	c := New(Options{Provider: "p", BaseURL: srv.URL})
+	var out any
+	if _, err := c.GetJSON(t.Context(), "/x", nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Contains(seen, srv.Listener.Addr().String()) {
+		t.Errorf("guard saw %v, want %s", seen, srv.Listener.Addr())
+	}
+}
+
+func TestNewPutsGetGuardInFrontOfTransport(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("server reached by non-GET request")
+	}))
+	defer srv.Close()
+	c := New(Options{Provider: "p", BaseURL: srv.URL})
+	for _, method := range []string{"POST", "PUT", "PATCH", "DELETE", "HEAD"} {
+		req, err := http.NewRequestWithContext(t.Context(), method, srv.URL, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := c.http.Do(req)
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		if !errors.Is(err, ErrMethodNotAllowed) {
+			t.Errorf("%s: err = %v, want ErrMethodNotAllowed", method, err)
+		}
 	}
 }

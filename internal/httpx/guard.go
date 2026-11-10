@@ -26,6 +26,9 @@ func (g *getOnlyTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	return g.next.RoundTrip(req)
 }
 
+// errDialBlocked marks a connection refused by the dial guard.
+var errDialBlocked = errors.New("httpx: dial blocked by guard")
+
 var dialGuard atomic.Pointer[func(address string) error]
 
 // SetDialGuard installs a process-wide check run on every resolved address
@@ -47,7 +50,7 @@ func LoopbackOnly(address string) error {
 	}
 	ip, err := netip.ParseAddr(host)
 	if err != nil || !ip.IsLoopback() {
-		return fmt.Errorf("httpx: dial guard: %q is not a loopback address", address)
+		return fmt.Errorf("%w: %q is not a loopback address", errDialBlocked, address)
 	}
 	return nil
 }
