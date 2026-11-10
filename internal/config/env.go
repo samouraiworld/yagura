@@ -29,11 +29,11 @@ func secret(lookup LookupFunc, name string) (Secret, error) {
 	case hasInline && hasFile:
 		return Secret{}, fmt.Errorf("%s and %s_FILE are both set; set only one", name, name)
 	case hasFile:
-		return Secret{name: name + "_FILE", file: file}, nil
+		return newSecret(name+"_FILE", "", file), nil
 	case hasInline:
-		return Secret{name: name, inline: inline}, nil
+		return newSecret(name, inline, ""), nil
 	}
-	return Secret{name: name}, nil
+	return newSecret(name, "", ""), nil
 }
 
 // duration parses a Go duration, enforcing the 30s minimum.
