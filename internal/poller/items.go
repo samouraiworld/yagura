@@ -38,10 +38,13 @@ func RunItems[T any](ctx context.Context, items []T, fn func(context.Context, T)
 		case err == nil, httpx.IsNotFound(err):
 		case fatal != nil:
 			// Already failing; errors from cancelled siblings do not count.
-		case ctx.Err() != nil || httpx.IsAuthError(err) ||
+		case httpx.IsAuthError(err) ||
 			errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
 			fatal = err
 			cancel()
+		case ctx.Err() != nil:
+			// The run is over; keep the context error, not a late failure.
+			fatal = ctx.Err()
 		default:
 			itemErrors++
 		}
@@ -51,9 +54,18 @@ func RunItems[T any](ctx context.Context, items []T, fn func(context.Context, T)
 	sem := make(chan struct{}, itemConcurrency)
 dispatch:
 	for _, it := range items {
+		// select picks randomly when both cases are ready, so check the
+		// context explicitly before and after acquiring a slot.
+		if ctx.Err() != nil {
+			break dispatch
+		}
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
+			break dispatch
+		}
+		if ctx.Err() != nil {
+			<-sem
 			break dispatch
 		}
 		wg.Add(1)
