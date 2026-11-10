@@ -2,6 +2,7 @@ package poller
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"sync"
@@ -114,8 +115,11 @@ func (s *Scheduler) pollOnce(ctx context.Context, p Poller) bool {
 	pctx, cancel := context.WithTimeout(ctx, PollTimeout(p.Interval()))
 	defer cancel()
 	start := time.Now()
-	res, err := p.Poll(pctx)
+	res, panicked, err := callPoll(pctx, p)
 	end := time.Now()
+	if panicked {
+		s.logger.Error("poll panicked", slog.String("collector", p.Name()), slog.Any("error", err))
+	}
 	if ctx.Err() != nil {
 		return err == nil
 	}
@@ -131,7 +135,9 @@ func (s *Scheduler) pollOnce(ctx context.Context, p Poller) bool {
 	if err != nil {
 		st.up = false
 		st.errors++
-		s.logger.Warn("poll failed", slog.String("collector", p.Name()), slog.Any("error", err))
+		if !panicked {
+			s.logger.Warn("poll failed", slog.String("collector", p.Name()), slog.Any("error", err))
+		}
 		return false
 	}
 	st.up = true
@@ -141,6 +147,18 @@ func (s *Scheduler) pollOnce(ctx context.Context, p Poller) bool {
 	st.itemErrors = res.ItemErrors
 	st.successes++
 	return true
+}
+
+// callPoll runs p.Poll and turns a panic into a poll error, so that one
+// broken poller fails its own poll instead of crashing the exporter.
+func callPoll(ctx context.Context, p Poller) (res Result, panicked bool, err error) {
+	defer func() {
+		if v := recover(); v != nil {
+			res, panicked, err = Result{}, true, fmt.Errorf("poller %s panicked: %v", p.Name(), v)
+		}
+	}()
+	res, err = p.Poll(ctx)
+	return res, false, err
 }
 
 // sleep waits for d or for ctx to be done. It reports whether the full

@@ -268,3 +268,82 @@ yagura_collector_polls_total{collector="x",result="success"} 0
 }
 
 func formatFloat(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
+
+// panicPoller panics on its first poll and succeeds afterwards.
+type panicPoller struct {
+	mu    sync.Mutex
+	calls int
+	m     prometheus.Metric
+}
+
+func (p *panicPoller) Name() string            { return "x" }
+func (p *panicPoller) Interval() time.Duration { return time.Hour }
+
+func (p *panicPoller) Poll(context.Context) (Result, error) {
+	p.mu.Lock()
+	p.calls++
+	n := p.calls
+	p.mu.Unlock()
+	if n == 1 {
+		panic("kaboom")
+	}
+	return Result{Metrics: []prometheus.Metric{p.m}}, nil
+}
+
+// lockedBuffer is a log sink shared by the scheduler and the test.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestSchedulerRecoversFromPanic(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := &panicPoller{m: named(t, "m", 1)}
+		var logs lockedBuffer
+		s := NewScheduler(slog.New(slog.NewTextHandler(&logs, nil)),
+			func() time.Duration { return 0 }, p)
+		cancel, done := runScheduler(s)
+		defer func() { cancel(); <-done }()
+		synctest.Wait()
+		expect(t, s, `# HELP yagura_collector_up 1 if the last poll succeeded, else 0.
+# TYPE yagura_collector_up gauge
+yagura_collector_up{collector="x"} 0
+# HELP yagura_collector_polls_total Poll attempts.
+# TYPE yagura_collector_polls_total counter
+yagura_collector_polls_total{collector="x",result="error"} 1
+yagura_collector_polls_total{collector="x",result="success"} 0
+`, "yagura_collector_up", "yagura_collector_polls_total")
+		out := logs.String()
+		for _, want := range []string{"level=ERROR", "collector=x", "poller x panicked: kaboom"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("log %q lacks %q", out, want)
+			}
+		}
+
+		// The poller stays scheduled: the retry one minute later succeeds.
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		expect(t, s, `# HELP m test
+# TYPE m gauge
+m 1
+# HELP yagura_collector_polls_total Poll attempts.
+# TYPE yagura_collector_polls_total counter
+yagura_collector_polls_total{collector="x",result="error"} 1
+yagura_collector_polls_total{collector="x",result="success"} 1
+`, "m", "yagura_collector_polls_total")
+		cancel()
+		<-done
+	})
+}
