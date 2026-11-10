@@ -1,0 +1,19 @@
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        entry: bash -c 'test -z "$(gofmt -l .)"'
+        language: system
+        types: [go]
+        pass_filenames: false
+      - id: private-denylist
+        name: private denylist
+        entry: scripts/private-denylist.sh
+        language: system
+        pass_filenames: false
+        always_run: true
