@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -72,5 +73,31 @@ func TestLandingPage(t *testing.T) {
 	code, body := get(t, handler(t, prometheus.NewRegistry()), "/")
 	if code != http.StatusOK || !strings.Contains(body, "/metrics") {
 		t.Fatalf("got %d %q", code, body)
+	}
+}
+
+func TestLandingPageHasNoProfilingLinks(t *testing.T) {
+	// /debug/pprof is not served, and the page must not point elsewhere.
+	// The toolkit's built-in CSS always holds an inert "#pprof" rule, so the
+	// check looks for the profiling block and its links, not the bare word.
+	_, body := get(t, handler(t, prometheus.NewRegistry()), "/")
+	for _, bad := range []string{`id="pprof"`, "debug/pprof", "pprof.me"} {
+		if strings.Contains(body, bad) {
+			t.Errorf("landing page contains %q", bad)
+		}
+	}
+}
+
+func TestServerTimeouts(t *testing.T) {
+	srv := newHTTPServer(http.NotFoundHandler())
+	for name, tc := range map[string]struct{ got, want time.Duration }{
+		"ReadHeaderTimeout": {srv.ReadHeaderTimeout, 10 * time.Second},
+		"ReadTimeout":       {srv.ReadTimeout, 30 * time.Second},
+		"WriteTimeout":      {srv.WriteTimeout, 30 * time.Second},
+		"IdleTimeout":       {srv.IdleTimeout, 60 * time.Second},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("%s = %v, want %v", name, tc.got, tc.want)
+		}
 	}
 }

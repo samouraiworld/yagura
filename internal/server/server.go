@@ -46,6 +46,8 @@ func Handler(opts Options) http.Handler {
 		Name:        "yagura",
 		Description: "Prometheus exporter for SaaS status, usage and billing",
 		Links:       []web.LandingLinks{{Address: "/metrics", Text: "Metrics"}},
+		// /debug/pprof is not served: no profiling links.
+		Profiling: "false",
 	})
 	if err != nil {
 		// The configuration above is static, so this cannot happen.
@@ -55,10 +57,22 @@ func Handler(opts Options) http.Handler {
 	return mux
 }
 
+// newHTTPServer returns the server ListenAndServe runs. The timeouts bound
+// how long a slow or idle client can hold a connection.
+func newHTTPServer(h http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+}
+
 // ListenAndServe serves until ctx is done, then shuts down gracefully.
 // It returns nil on a clean shutdown and the listen error otherwise.
 func ListenAndServe(ctx context.Context, opts Options) error {
-	srv := &http.Server{Handler: Handler(opts), ReadHeaderTimeout: 10 * time.Second}
+	srv := newHTTPServer(Handler(opts))
 	systemd := false
 	flags := &web.FlagConfig{
 		WebListenAddresses: &[]string{opts.ListenAddress},
