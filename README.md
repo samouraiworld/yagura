@@ -9,7 +9,7 @@ VictoriaMetrics setup can scrape it, graph it in Grafana and alert on it.
 
 ## Features
 
-- Read-only: only `GET` requests ever leave the exporter.
+- Read-only: only `GET` requests are sent to provider APIs.
 - Poll-and-cache: scrapes never call a provider; `/metrics` reads memory.
 - Self-monitoring metrics for every poller, plus request and build metrics.
 - Configuration from environment variables only; secrets also accepted as files.
@@ -112,8 +112,9 @@ default intervals. Beyond that, raise the poll intervals.
 
 ## Security model
 
-- Read-only: only `GET` leaves the exporter. A guard enforces this on every
-  request.
+- Read-only: only `GET` requests are sent to provider APIs. A guard enforces
+  this on every request. When an HTTPS proxy is configured, the transport
+  opens a `CONNECT` tunnel to that proxy.
 - Requests go to the provider's API only, through `HTTPS_PROXY` / `HTTP_PROXY`
   if the operator sets them.
 - Tokens are read from the environment or from `_FILE` files, re-read on each
