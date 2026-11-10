@@ -1,0 +1,6 @@
+/yagura
+/dist/
+.env
+.claude/docs/
+.claude/settings.local.json
+coverage.out
