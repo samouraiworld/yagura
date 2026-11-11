@@ -201,30 +201,35 @@
             {
               "type": "value",
               "options": {
+                "-2": {
+                  "text": "maintenance",
+                  "color": "blue",
+                  "index": 0
+                },
                 "-1": {
                   "text": "unknown",
                   "color": "purple",
-                  "index": 0
+                  "index": 1
                 },
                 "0": {
                   "text": "OK",
                   "color": "green",
-                  "index": 1
+                  "index": 2
                 },
                 "1": {
                   "text": "minor",
                   "color": "yellow",
-                  "index": 2
+                  "index": 3
                 },
                 "2": {
                   "text": "major",
                   "color": "orange",
-                  "index": 3
+                  "index": 4
                 },
                 "3": {
                   "text": "critical",
                   "color": "red",
-                  "index": 4
+                  "index": 5
                 }
               }
             }

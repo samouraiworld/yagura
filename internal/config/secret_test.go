@@ -58,9 +58,60 @@ func TestSecretFileTrimmedAndEmpty(t *testing.T) {
 	if _, err := s.Read(); err == nil || !strings.Contains(err.Error(), "X_FILE") {
 		t.Fatalf("missing: %v", err)
 	}
-	s, _ = secret(mapLookup(map[string]string{"X": " \r\n"}), "X")
-	if _, err := s.Read(); err == nil || !strings.Contains(err.Error(), "X") {
-		t.Fatalf("empty inline: %v", err)
+}
+
+// A whitespace-only inline value is fixed for the life of the process, so it
+// fails at startup instead of enabling a collector that fails every poll.
+func TestSecretWhitespaceOnlyInlineIsAnError(t *testing.T) {
+	for _, v := range []string{" ", "\t", " \r\n", "\n\n", "\v", "\f", "\u00a0", " \u0085\u2003"} {
+		s, err := secret(mapLookup(map[string]string{"X": v}), "X")
+		if err == nil || err.Error() != "X: secret is empty" {
+			t.Errorf("%q: want error naming X, got %v", v, err)
+		}
+		if s.IsSet() {
+			t.Errorf("%q: rejected secret reports IsSet", v)
+		}
+	}
+	s, err := secret(mapLookup(map[string]string{"X": "\u00a0tok\v\r\n"}), "X")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, err := s.Read(); err != nil || v != "tok" {
+		t.Fatalf("padded inline: %q %v", v, err)
+	}
+}
+
+// Setting both variables is reported first, even when one of them is blank.
+func TestSecretBothSetWinsOverBlank(t *testing.T) {
+	for _, env := range []map[string]string{
+		{"X": " ", "X_FILE": "/f"},
+		{"X": "tok", "X_FILE": " "},
+	} {
+		_, err := secret(mapLookup(env), "X")
+		if err == nil || !strings.Contains(err.Error(), "both set") {
+			t.Errorf("%q: want the both-set error, got %v", env, err)
+		}
+	}
+}
+
+func TestSecretFileOfUnicodeSpacesIsEmpty(t *testing.T) {
+	s, _ := secret(mapLookup(map[string]string{"X_FILE": writeFile(t, "\v\u00a0\n")}), "X")
+	if _, err := s.Read(); err == nil || err.Error() != "X_FILE: secret is empty" {
+		t.Fatalf("want error naming X_FILE, got %v", err)
+	}
+}
+
+// A blank X_FILE path is fixed for the life of the process too: it fails at
+// startup instead of enabling a collector whose every poll fails.
+func TestSecretBlankFilePathIsAnError(t *testing.T) {
+	for _, v := range []string{" ", "\t", "\r\n"} {
+		s, err := secret(mapLookup(map[string]string{"X_FILE": v}), "X")
+		if err == nil || err.Error() != "X_FILE: path is empty" {
+			t.Errorf("%q: want error naming X_FILE, got %v", v, err)
+		}
+		if s.IsSet() {
+			t.Errorf("%q: rejected secret reports IsSet", v)
+		}
 	}
 }
 

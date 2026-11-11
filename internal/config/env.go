@@ -21,7 +21,11 @@ func get(lookup LookupFunc, name string) (string, bool) {
 	return v, true
 }
 
-// secret reads the secret X or X_FILE; setting both is an error.
+// secret reads the secret X or X_FILE; setting both is an error. An inline
+// value or a file path made only of whitespace is an error too: unlike the
+// content of a file, it cannot change while the process runs, so it would only
+// enable a collector that fails every poll. Errors name the variable, never
+// the value.
 func secret(lookup LookupFunc, name string) (Secret, error) {
 	inline, hasInline := get(lookup, name)
 	file, hasFile := get(lookup, name+"_FILE")
@@ -29,8 +33,14 @@ func secret(lookup LookupFunc, name string) (Secret, error) {
 	case hasInline && hasFile:
 		return Secret{}, fmt.Errorf("%s and %s_FILE are both set; set only one", name, name)
 	case hasFile:
+		if strings.TrimSpace(file) == "" {
+			return Secret{}, fmt.Errorf("%s_FILE: path is empty", name)
+		}
 		return newSecret(name+"_FILE", "", file), nil
 	case hasInline:
+		if strings.TrimSpace(inline) == "" {
+			return Secret{}, fmt.Errorf("%s: secret is empty", name)
+		}
 		return newSecret(name, inline, ""), nil
 	}
 	return newSecret(name, "", ""), nil

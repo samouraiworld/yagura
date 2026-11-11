@@ -48,8 +48,10 @@ when its credential variable (or its `_FILE` variant) is set.
 
 Every secret variable `X` also accepts `X_FILE`, naming a file whose trimmed
 content is the secret (Docker and Kubernetes secrets). Setting both is a
-startup error. A `_FILE` secret is re-read before each poll, so a rotated
-token is picked up without a restart. Intervals use Go duration syntax with a
+startup error, and so is an inline value or a `_FILE` path made only of
+whitespace. A `_FILE` secret is re-read before each poll, so a rotated token is
+picked up without a restart; a file that is empty after trimming fails that
+poll. Intervals use Go duration syntax with a
 minimum of 30s. Provider variables are listed in each provider section below.
 
 ## Metric reference
@@ -64,14 +66,14 @@ Go runtime and process metrics are also exposed.
 | `yagura_collector_last_duration_seconds` | gauge | `collector` | Duration of the last poll |
 | `yagura_collector_last_item_errors` | gauge | `collector` | Items failed or skipped in the last successful poll |
 | `yagura_collector_polls_total` | counter | `collector`, `result` | Poll attempts (`success` or `error`) |
-| `yagura_statuspage_indicator` | gauge | `provider` | Page indicator: `none`=0, `minor`=1, `major`=2, `critical`=3, anything else -1 |
+| `yagura_statuspage_indicator` | gauge | `provider` | Page indicator: `none`=0, `minor`=1, `major`=2, `critical`=3, `maintenance`=-2, anything else -1 |
 | `yagura_statuspage_unresolved_incidents` | gauge | `provider` | Unresolved incidents (omitted if the page does not serve them) |
 | `yagura_statuspage_active_maintenances` | gauge | `provider` | Active scheduled maintenances (omitted if the page does not serve them) |
 | `yagura_statuspage_updated_timestamp_seconds` | gauge | `provider` | Unix time of the page's `updated_at` |
 | `yagura_gandi_domain_expiry_timestamp_seconds` | gauge | `domain` | Unix time at which the domain registration ends |
 | `yagura_gandi_domain_autorenew` | gauge | `domain` | 1 if the domain renews automatically, else 0 |
-| `yagura_gandi_prepaid_balance` | gauge | `currency` | Prepaid account balance (omitted if the account has no prepaid) |
-| `yagura_gandi_prepaid_warning_threshold` | gauge | `currency` | Balance below which Gandi sends a warning (omitted if the account has no prepaid) |
+| `yagura_gandi_prepaid_balance` | gauge | `currency` | Prepaid account balance (omitted if the account has no prepaid; omitted with an item error if missing) |
+| `yagura_gandi_prepaid_warning_threshold` | gauge | `currency` | Balance below which Gandi sends a warning (omitted if the account has no prepaid or no threshold set; omitted with an item error if it is not a number) |
 | `yagura_scaleway_consumption_amount` | gauge | `project_id`, `project_name`, `category`, `currency` | Consumption month to date, as reported by the Scaleway billing API; resets on the 1st |
 | `yagura_scaleway_consumption_updated_timestamp_seconds` | gauge | none | Unix time of the billing API's last consumption update (omitted if the API does not send a valid one) |
 | `yagura_api_requests_total` | counter | `provider`, `code` | Outbound requests (HTTP status, `invalid` for a status outside 100-599, or `error` for network failures) |
@@ -126,8 +128,10 @@ page name. Metrics are listed in the [metric reference](#metric-reference).
 | `YAGURA_STATUSPAGE_EXTRA_PAGES` | empty | Same format, appended to the list |
 | `YAGURA_STATUSPAGE_INTERVAL` | `1m` | Poll interval (minimum 30s) |
 
-An unknown or missing indicator is exported as `-1` and counts in
-`yagura_collector_last_item_errors`.
+A `maintenance` indicator is exported as `-2`: it is a normal page state, so
+it logs no warning, counts no item error and stays below the
+`YaguraProviderIncident` threshold (`>= 2`). An unknown or missing indicator
+is exported as `-1` and counts in `yagura_collector_last_item_errors`.
 
 Names must match `^[a-z0-9_]+$` and be unique; URLs must be `https`
 without query or fragment. Redirects are not followed, so use the final URL of
@@ -145,7 +149,10 @@ Gandi API v5 (`https://api.gandi.net`). It is enabled when `YAGURA_GANDI_TOKEN`
   whether it renews automatically.
 - `gandi_billing` reads the billing information and exports the prepaid balance
   and its warning threshold. An account without prepaid exports no prepaid
-  series and the poll still succeeds.
+  series and the poll still succeeds. A prepaid account without a warning
+  threshold exports the balance only, also without error; the
+  `YaguraGandiPrepaidBalanceLow` alert compares the two series, so it cannot
+  fire until a threshold is set in Gandi.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -348,7 +355,13 @@ default intervals. Beyond that, raise the poll intervals.
 ## Dashboard and alerts
 
 - `dashboards/yagura-overview.json`: classic Grafana dashboard JSON. Import it
-  and pick your Prometheus data source in the `datasource` variable.
+  and pick your Prometheus data source in the `datasource` variable. A Grafana
+  data source variable lists one plugin type only, here `prometheus`, so a data
+  source of the VictoriaMetrics plugin type does not appear in it. With
+  VictoriaMetrics, add a data source of type Prometheus whose URL points at
+  VictoriaMetrics (single-node, or vmselect with its `/select/<tenant>/prometheus`
+  path): VictoriaMetrics serves the Prometheus query API, and the dashboard
+  uses only PromQL.
 - `alerts/yagura.rules.yml`: example rules for Prometheus and vmalert. The
   `YaguraExporterDown` rule assumes the scrape job is named `yagura`. Check
   the rules with `make rules` (needs Docker).

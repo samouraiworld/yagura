@@ -12,7 +12,7 @@ var MetricNames = []string{
 
 var (
 	indicatorDesc = prometheus.NewDesc(MetricNames[0],
-		"Page status indicator: none=0, minor=1, major=2, critical=3, unknown=-1.", []string{"provider"}, nil)
+		"Page status indicator: none=0, minor=1, major=2, critical=3, maintenance=-2, unknown=-1.", []string{"provider"}, nil)
 	incidentsDesc = prometheus.NewDesc(MetricNames[1],
 		"Number of unresolved incidents.", []string{"provider"}, nil)
 	maintenancesDesc = prometheus.NewDesc(MetricNames[2],

@@ -44,7 +44,8 @@ func (s Secret) IsSet() bool {
 	return s.d != nil && ((s.d.inline != nil && *s.d.inline != "") || s.d.file != "")
 }
 
-// Read returns the secret value with surrounding spaces, CR and LF trimmed.
+// Read returns the secret value with surrounding whitespace (any Unicode
+// space, including CR and LF) trimmed.
 // Errors name the variable and never include the value or file content.
 func (s Secret) Read() (string, error) {
 	d := s.d
@@ -71,7 +72,7 @@ func (s Secret) Read() (string, error) {
 		}
 		raw = string(b)
 	}
-	v := strings.Trim(raw, " \t\r\n")
+	v := strings.TrimSpace(raw)
 	if v == "" {
 		return "", fmt.Errorf("%s: secret is empty", d.name)
 	}

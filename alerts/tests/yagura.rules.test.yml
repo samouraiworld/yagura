@@ -69,6 +69,9 @@ tests:
       # Critical (3) for only 3 minutes then back to none: never fires.
       - series: 'yagura_statuspage_indicator{provider="demo_brief"}'
         values: '3 3 3 0 0 0 0 0 0 0 0'
+      # Maintenance (-2) for the whole window: never fires.
+      - series: 'yagura_statuspage_indicator{provider="demo_maintenance"}'
+        values: '-2x10'
     alert_rule_test:
       - eval_time: 4m
         alertname: YaguraProviderIncident

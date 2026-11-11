@@ -59,7 +59,7 @@ func compare(t *testing.T, res poller.Result, want string) {
 }
 
 const (
-	hdrIndicator = "# HELP yagura_statuspage_indicator Page status indicator: none=0, minor=1, major=2, critical=3, unknown=-1.\n# TYPE yagura_statuspage_indicator gauge\n"
+	hdrIndicator = "# HELP yagura_statuspage_indicator Page status indicator: none=0, minor=1, major=2, critical=3, maintenance=-2, unknown=-1.\n# TYPE yagura_statuspage_indicator gauge\n"
 	hdrIncidents = "# HELP yagura_statuspage_unresolved_incidents Number of unresolved incidents.\n# TYPE yagura_statuspage_unresolved_incidents gauge\n"
 	hdrMaint     = "# HELP yagura_statuspage_active_maintenances Number of active scheduled maintenances.\n# TYPE yagura_statuspage_active_maintenances gauge\n"
 	hdrUpdated   = "# HELP yagura_statuspage_updated_timestamp_seconds Unix time of the page's last update.\n# TYPE yagura_statuspage_updated_timestamp_seconds gauge\n"
@@ -127,10 +127,30 @@ func TestStatuspageNonJSONOptionalEndpointIsOmitted(t *testing.T) {
 		updated())
 }
 
-func TestStatuspageUnknownIndicator(t *testing.T) {
+func TestStatuspageMaintenanceIndicator(t *testing.T) {
 	var logs bytes.Buffer
 	p, _ := newPoller(t, map[string]testkit.Route{
 		tStatus:    fixture("status_maintenance.json"),
+		tIncidents: html404(),
+		tMaint:     html404(),
+	}, &logs)
+	res, err := poll(t, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compare(t, res, indicator("-2")+updated())
+	if res.ItemErrors != 0 {
+		t.Errorf("ItemErrors = %d, want 0", res.ItemErrors)
+	}
+	if strings.Contains(logs.String(), "level=WARN") {
+		t.Errorf("maintenance indicator must not warn:\n%s", logs.String())
+	}
+}
+
+func TestStatuspageUnknownIndicator(t *testing.T) {
+	var logs bytes.Buffer
+	p, _ := newPoller(t, map[string]testkit.Route{
+		tStatus:    {Body: `{"page":{"updated_at":"2026-01-02T03:04:05.000+01:00"},"status":{"indicator":"unexpected"}}`},
 		tIncidents: html404(),
 		tMaint:     html404(),
 	}, &logs)
@@ -263,7 +283,8 @@ func TestStatuspageItemErrors(t *testing.T) {
 		{"missing updated_at", `{"page":{},"status":{"indicator":"none"}}`, 1},
 		{"unparseable updated_at", `{"page":{"updated_at":"yesterday"},"status":{"indicator":"none"}}`, 1},
 		{"both missing", `{"page":{},"status":{}}`, 2},
-		{"unknown non-empty indicator", `{"page":{"updated_at":"2026-01-02T03:04:05.000+01:00"},"status":{"indicator":"maintenance"}}`, 1},
+		{"unknown non-empty indicator", `{"page":{"updated_at":"2026-01-02T03:04:05.000+01:00"},"status":{"indicator":"unexpected"}}`, 1},
+		{"maintenance indicator", `{"page":{"updated_at":"2026-01-02T03:04:05.000+01:00"},"status":{"indicator":"maintenance"}}`, 0},
 		{"full", `{"page":{"updated_at":"2026-01-02T03:04:05.000+01:00"},"status":{"indicator":"none"}}`, 0},
 	}
 	for _, tc := range cases {

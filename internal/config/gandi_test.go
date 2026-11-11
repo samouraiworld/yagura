@@ -73,6 +73,8 @@ func TestGandiValidation(t *testing.T) {
 		want string
 	}{
 		{"token and file", map[string]string{"YAGURA_GANDI_TOKEN": "s3cretpw", "YAGURA_GANDI_TOKEN_FILE": "/f"}, "YAGURA_GANDI_TOKEN_FILE"},
+		{"whitespace-only token", map[string]string{"YAGURA_GANDI_TOKEN": " \t\r\n"}, "YAGURA_GANDI_TOKEN: secret is empty"},
+		{"blank token file path", map[string]string{"YAGURA_GANDI_TOKEN_FILE": " \n"}, "YAGURA_GANDI_TOKEN_FILE: path is empty"},
 		{"domains interval", map[string]string{"YAGURA_GANDI_TOKEN": "s3cretpw", "YAGURA_GANDI_DOMAINS_INTERVAL": "10s"}, "YAGURA_GANDI_DOMAINS_INTERVAL"},
 		{"billing interval", map[string]string{"YAGURA_GANDI_TOKEN": "s3cretpw", "YAGURA_GANDI_BILLING_INTERVAL": "soon"}, "YAGURA_GANDI_BILLING_INTERVAL"},
 	}
