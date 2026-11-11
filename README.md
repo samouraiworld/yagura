@@ -67,7 +67,7 @@ Go runtime and process metrics are also exposed.
 | `yagura_statuspage_unresolved_incidents` | gauge | `provider` | Unresolved incidents (omitted if the page does not serve them) |
 | `yagura_statuspage_active_maintenances` | gauge | `provider` | Active scheduled maintenances (omitted if the page does not serve them) |
 | `yagura_statuspage_updated_timestamp_seconds` | gauge | `provider` | Unix time of the page's `updated_at` |
-| `yagura_api_requests_total` | counter | `provider`, `code` | Outbound requests (HTTP status, or `error` for network failures) |
+| `yagura_api_requests_total` | counter | `provider`, `code` | Outbound requests (HTTP status, `invalid` for a status outside 100-599, or `error` for network failures) |
 | `yagura_build_info` | gauge | `version`, `revision`, `goversion` | Build metadata, always 1 |
 
 ## Scrape examples

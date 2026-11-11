@@ -231,7 +231,12 @@ func (c *Client) once(ctx context.Context, path, target string, out any) attempt
 		return attempt{err: fmt.Errorf("GET %s: %w", path, err), retry: retry}
 	}
 	defer func() { _ = resp.Body.Close() }()
-	c.count(strconv.Itoa(resp.StatusCode))
+	// A remote can send any number; keep the label set bounded.
+	if resp.StatusCode >= 100 && resp.StatusCode <= 599 {
+		c.count(strconv.Itoa(resp.StatusCode))
+	} else {
+		c.count("invalid")
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))

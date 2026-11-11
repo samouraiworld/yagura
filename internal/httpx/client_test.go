@@ -203,3 +203,30 @@ func TestRedirectIsNotFollowed(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+type statusTransport struct{ code int }
+
+func (s statusTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return &http.Response{StatusCode: s.code, Header: http.Header{}, Body: http.NoBody, Request: r}, nil
+}
+
+func TestRequestsCounterBoundsCodeLabel(t *testing.T) {
+	for _, tc := range []struct {
+		code int
+		want string
+	}{
+		{404, "404"}, {100, "100"}, {599, "599"},
+		{999, "invalid"}, {600, "invalid"}, {99, "invalid"}, {0, "invalid"}, {-5, "invalid"},
+	} {
+		counter := NewRequestsCounter()
+		c := newClient(Options{Provider: "p", BaseURL: "https://example.com", Requests: counter}, statusTransport{code: tc.code})
+		var out any
+		_, _ = c.GetJSON(t.Context(), "/x", nil, &out)
+		if v := testutil.ToFloat64(counter.WithLabelValues("p", tc.want)); v != 1 {
+			t.Errorf("status %d: code=%q count = %v, want 1", tc.code, tc.want, v)
+		}
+		if n := testutil.CollectAndCount(counter); n != 1 {
+			t.Errorf("status %d: %d series, want 1", tc.code, n)
+		}
+	}
+}
