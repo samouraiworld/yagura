@@ -140,16 +140,16 @@ func listSites(ctx context.Context, c *httpx.Client, logger *slog.Logger) ([]sit
 	return out, skipped, nil
 }
 
-// logItemError logs the failure of one per-site call: a gone site at debug
+// logItemError logs the failure of one per-item call: a gone item at debug
 // level, other failures as warnings. Auth errors, skipped items (which log
 // their own warning) and errors after cancellation are not logged.
 func logItemError(ctx context.Context, logger *slog.Logger, what string, id string, err error) {
 	switch {
 	case httpx.IsNotFound(err):
-		logger.Debug("netlify site gone; "+what+" omitted", "site_id", id)
+		logger.Debug("netlify "+what+" not found; omitted", "id", id)
 	case httpx.IsAuthError(err), errors.Is(err, poller.ErrItemSkipped), ctx.Err() != nil:
 	default:
-		logger.Warn("netlify "+what+" call failed", "site_id", id, "error", capped(err.Error()))
+		logger.Warn("netlify "+what+" call failed", "id", id, "error", capped(err.Error()))
 	}
 }
 
