@@ -72,6 +72,8 @@ Go runtime and process metrics are also exposed.
 | `yagura_gandi_domain_autorenew` | gauge | `domain` | 1 if the domain renews automatically, else 0 |
 | `yagura_gandi_prepaid_balance` | gauge | `currency` | Prepaid account balance (omitted if the account has no prepaid) |
 | `yagura_gandi_prepaid_warning_threshold` | gauge | `currency` | Balance below which Gandi sends a warning (omitted if the account has no prepaid) |
+| `yagura_scaleway_consumption_amount` | gauge | `project_id`, `project_name`, `category`, `currency` | Consumption month to date, as reported by the Scaleway billing API; resets on the 1st |
+| `yagura_scaleway_consumption_updated_timestamp_seconds` | gauge | none | Unix time of the billing API's last consumption update (omitted if the API does not send it) |
 | `yagura_api_requests_total` | counter | `provider`, `code` | Outbound requests (HTTP status, `invalid` for a status outside 100-599, or `error` for network failures) |
 | `yagura_build_info` | gauge | `version`, `revision`, `goversion` | Build metadata, always 1 |
 
@@ -188,6 +190,136 @@ For domains held at other registrars, use a WHOIS-based exporter such as
 [`shift/domain_exporter`](https://github.com/shift/domain_exporter). TLS
 certificate expiry stays the job of
 [blackbox_exporter](https://github.com/prometheus/blackbox_exporter).
+
+### Scaleway
+
+Reads the organization's consumption for the current month through the
+Scaleway billing API (`https://api.scaleway.com`). It is enabled when
+`YAGURA_SCALEWAY_SECRET_KEY` (or `YAGURA_SCALEWAY_SECRET_KEY_FILE`) is set and
+runs one poller, `scaleway_consumption`. The API returns one row per product,
+resource or SKU; yagura sums them per project, category and currency, so
+products, resources and SKUs never become labels.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `YAGURA_SCALEWAY_SECRET_KEY` (or `_FILE`) | empty | Secret key of an IAM application; enables the collector |
+| `YAGURA_SCALEWAY_ORGANIZATION_ID` | empty | Organization ID (UUID) whose consumption is read; required when the collector is enabled |
+| `YAGURA_SCALEWAY_INTERVAL` | `1h` | Poll interval (minimum 30s) |
+
+Metrics are listed in the [metric reference](#metric-reference). The amount
+is month to date and resets on the 1st: it grows during the month, then the
+series drops back. A project with no consumption yet this month has no series.
+It is the value the billing API reports, which can lag behind real usage;
+`yagura_scaleway_consumption_updated_timestamp_seconds` shows when Scaleway
+last updated it. A row without an amount or currency is skipped, logged and
+counted in `yagura_collector_last_item_errors`. A row without a project name
+keeps an empty `project_name` label, so the total is never undercounted.
+
+**VAT, not confirmed:** the Scaleway console shows consumption excluding
+taxes, and the API field naming suggests the same, but we have not confirmed
+whether the amount the API returns includes VAT. Compare it with an invoice
+before you set a budget on it.
+
+**Key setup.** In the Scaleway console, under IAM:
+
+- create an IAM *application* rather than using a user's API key, so the key
+  is not tied to a person;
+- attach a policy to the application with a single rule: the
+  `BillingReadOnly` permission set, scoped to the organization ("List and read
+  access to billing information"). No project permission is needed: the
+  consumption rows already carry project IDs and names;
+- generate an API key for the application, with an expiry date; the
+  `YaguraCollectorFailing` alert tells you when it has expired;
+- set `YAGURA_SCALEWAY_SECRET_KEY` to the key's *secret* key (not its access
+  key) and `YAGURA_SCALEWAY_ORGANIZATION_ID` to the organization ID.
+
+Not confirmed either: whether `BillingReadOnly` alone is enough to filter by
+organization. If the poller fails and `yagura_api_requests_total` shows code
+`403` for `scaleway`, check the policy and its scope.
+
+With this collector on, `/metrics` shows the organization's project names and
+IDs and what each one has cost this month. Turn on the web config (TLS, basic
+auth) or keep the port reachable only by your Prometheus server.
+
+The `YaguraMonthlyCostOverBudget` alert fires when the month-to-date total of
+a currency stays above 100 for an hour. 100 is an example: edit it in
+`alerts/yagura.rules.yml` to your budget.
+
+#### Bucket size and object count (Cockpit)
+
+yagura does not read Object Storage bucket metrics: Scaleway already publishes
+them in Cockpit, its managed metrics service, as
+`object_storage_bucket_usage_bytes_total` (bytes stored) and
+`object_storage_bucket_objects_total` (object count), refreshed hourly. Both
+ways below need a Cockpit token with the *Query* permission, created in the
+same region as the metrics data source, and the data source URL shown in the
+Cockpit console, `https://<data-source-id>.metrics.cockpit.<region>.scw.cloud`.
+
+**Grafana data source** (the data stays in Cockpit): add a Prometheus data
+source whose URL is the data source URL followed by `/prometheus`, with a
+custom HTTP header `X-Token` set to the token. As a provisioning file:
+
+```yaml
+apiVersion: 1
+datasources:
+  - name: Scaleway Cockpit
+    type: prometheus
+    access: proxy
+    url: https://<data-source-id>.metrics.cockpit.<region>.scw.cloud/prometheus
+    jsonData:
+      httpHeaderName1: X-Token
+    secureJsonData:
+      httpHeaderValue1: <cockpit-token>
+```
+
+**Federation** (copies the series into your own Prometheus): scrape the
+Cockpit `/federate` endpoint. It is in beta: Scaleway does not bill it during
+the beta and says it may be billed afterwards. Keep `match[]` narrow, since
+every federated sample may count. Prometheus 2.55 or later (for
+`http_headers`):
+
+```yaml
+scrape_configs:
+  - job_name: scaleway-cockpit
+    scrape_interval: 3m
+    honor_labels: true
+    scheme: https
+    metrics_path: /federate
+    params:
+      'match[]': ['{__name__=~"object_storage_bucket_(usage_bytes|objects)_total"}']
+    http_headers:
+      X-Token:
+        files: [/etc/prometheus/scw-cockpit-token]
+    static_configs:
+      - targets: ["<data-source-id>.metrics.cockpit.<region>.scw.cloud"]
+```
+
+Grafana Alloy 1.8 or later:
+
+```alloy
+local.file "scw_cockpit_token" {
+  filename  = "/etc/alloy/scw-cockpit-token"
+  is_secret = true
+}
+
+prometheus.scrape "scaleway_cockpit" {
+  targets         = [{"__address__" = "<data-source-id>.metrics.cockpit.<region>.scw.cloud"}]
+  scheme          = "https"
+  metrics_path    = "/federate"
+  honor_labels    = true
+  scrape_interval = "3m"
+  params          = {"match[]" = ["{__name__=~\"object_storage_bucket_(usage_bytes|objects)_total\"}"]}
+  http_headers    = {"X-Token" = [local.file.scw_cockpit_token.content]}
+  forward_to      = [prometheus.remote_write.default.receiver]
+}
+```
+
+Write the token file without a trailing newline.
+
+For per-resource consumption and an inventory of instances, volumes and other
+resources, use [`promhippie/scw_exporter`](https://github.com/promhippie/scw_exporter).
+Its inventory collectors need read access to those resources, beyond
+`BillingReadOnly`.
 
 ## Target scale
 

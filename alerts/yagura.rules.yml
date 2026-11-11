@@ -58,3 +58,16 @@ groups:
         annotations:
           summary: "Gandi prepaid balance is low ({{ $labels.currency }})"
           description: "The Gandi prepaid balance is {{ $value }} {{ $labels.currency }}, below the warning threshold set in the Gandi account."
+
+      - alert: YaguraMonthlyCostOverBudget
+        # 100 is an example monthly budget: edit it to yours. The amount is
+        # month to date and resets on the 1st, so the alert resolves then.
+        # One threshold applies to every currency; add a currency matcher
+        # (for example {currency="EUR"}) if the account bills in several.
+        expr: sum by (currency) (yagura_scaleway_consumption_amount) > 100
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Scaleway month-to-date cost is over budget ({{ $labels.currency }})"
+          description: "Scaleway consumption since the 1st of the month is {{ printf \"%.2f\" $value }} {{ $labels.currency }}, above the budget set in this alert rule."

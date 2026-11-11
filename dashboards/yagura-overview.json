@@ -497,6 +497,127 @@
           }
         ]
       }
+    },
+    {
+      "id": 12,
+      "title": "Costs",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 23,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 13,
+      "title": "Scaleway month to date by project",
+      "type": "barchart",
+      "datasource": "${datasource}",
+      "description": "Scaleway consumption since the 1st of the month, per project and currency, stacked by category. Resets on the 1st. VAT inclusion is not confirmed: see the README.",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 16,
+        "h": 8
+      },
+      "options": {
+        "orientation": "horizontal",
+        "stacking": "normal",
+        "showValue": "never",
+        "barWidth": 0.8,
+        "groupWidth": 0.7,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "${datasource}",
+          "expr": "label_join(sum by (project_name, category, currency) (yagura_scaleway_consumption_amount), \"project\", \" \", \"project_name\", \"currency\")",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "groupingToMatrix",
+          "options": {
+            "rowField": "project",
+            "columnField": "category",
+            "valueField": "Value",
+            "emptyValue": "zero"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 14,
+      "title": "Scaleway month to date total",
+      "type": "stat",
+      "datasource": "${datasource}",
+      "description": "Scaleway consumption since the 1st of the month, per currency. Resets on the 1st.",
+      "gridPos": {
+        "x": 16,
+        "y": 24,
+        "w": 8,
+        "h": 8
+      },
+      "options": {
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "${datasource}",
+          "expr": "sum by (currency) (yagura_scaleway_consumption_amount)",
+          "legendFormat": "{{currency}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      }
     }
   ]
 }

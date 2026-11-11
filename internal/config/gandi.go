@@ -7,9 +7,9 @@ import (
 	"time"
 )
 
-// uuidPattern matches the 8-4-4-4-12 hexadecimal form of a Gandi
-// organization ID. The billing poller appends the ID to a URL path, so
-// nothing else may pass.
+// uuidPattern matches the 8-4-4-4-12 hexadecimal form of an organization ID
+// (Gandi sharing ID, Scaleway organization ID). Pollers put the ID in a URL
+// path or query, so nothing else may pass.
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // GandiConfig holds the Gandi collector settings.

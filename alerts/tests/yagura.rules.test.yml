@@ -160,3 +160,30 @@ tests:
             exp_annotations:
               summary: "Gandi prepaid balance is low (EUR)"
               description: "The Gandi prepaid balance is 10 EUR, below the warning threshold set in the Gandi account."
+
+  - interval: 1m
+    input_series:
+      # EUR: two projects and categories sum to 110.25, over the 100 budget:
+      # fires after the 1h "for".
+      - series: 'yagura_scaleway_consumption_amount{project_id="00000000-0000-0000-0000-000000000001", project_name="demo-web", category="Compute", currency="EUR"}'
+        values: '60.25x120'
+      - series: 'yagura_scaleway_consumption_amount{project_id="00000000-0000-0000-0000-000000000002", project_name="demo-data", category="Storage", currency="EUR"}'
+        values: '50x120'
+      # USD: 80 in total, under the budget: never fires.
+      - series: 'yagura_scaleway_consumption_amount{project_id="00000000-0000-0000-0000-000000000001", project_name="demo-web", category="Compute", currency="USD"}'
+        values: '50x120'
+      - series: 'yagura_scaleway_consumption_amount{project_id="00000000-0000-0000-0000-000000000001", project_name="demo-web", category="Network", currency="USD"}'
+        values: '30x120'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: YaguraMonthlyCostOverBudget
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: YaguraMonthlyCostOverBudget
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              currency: EUR
+            exp_annotations:
+              summary: "Scaleway month-to-date cost is over budget (EUR)"
+              description: "Scaleway consumption since the 1st of the month is 110.25 EUR, above the budget set in this alert rule."
