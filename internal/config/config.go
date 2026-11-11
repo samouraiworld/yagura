@@ -2,7 +2,7 @@
 package config
 
 import (
-	"fmt"
+	"errors"
 	"log/slog"
 )
 
@@ -38,12 +38,12 @@ func Load(lookup LookupFunc) (*Config, error) {
 		case "error":
 			c.LogLevel = slog.LevelError
 		default:
-			return nil, fmt.Errorf("YAGURA_LOG_LEVEL: %q is not one of debug, info, warn, error", v)
+			return nil, errors.New("YAGURA_LOG_LEVEL: must be one of debug, info, warn, error")
 		}
 	}
 	if v, ok := get(lookup, "YAGURA_LOG_FORMAT"); ok {
 		if v != "logfmt" && v != "json" {
-			return nil, fmt.Errorf("YAGURA_LOG_FORMAT: %q is not one of logfmt, json", v)
+			return nil, errors.New("YAGURA_LOG_FORMAT: must be one of logfmt, json")
 		}
 		c.LogFormat = v
 	}

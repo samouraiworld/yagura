@@ -132,3 +132,28 @@ func TestSecretFileSizeCapped(t *testing.T) {
 		t.Fatalf("error leaks file content: %v", err)
 	}
 }
+
+func TestSecretFileErrorHidesPath(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "s3cretpw")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, path := range map[string]string{ //nolint:gosec // fake credential, asserts it is not echoed
+		"token pasted as path": "s3cretpw-not-a-path",
+		"directory":            dir,
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, err := secret(mapLookup(map[string]string{"X_FILE": path}), "X")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = s.Read()
+			if err == nil || !strings.Contains(err.Error(), "X_FILE") {
+				t.Fatalf("want error naming X_FILE, got %v", err)
+			}
+			if strings.Contains(err.Error(), "s3cretpw") {
+				t.Fatalf("error echoes the path: %v", err)
+			}
+		})
+	}
+}
