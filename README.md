@@ -9,7 +9,8 @@ VictoriaMetrics setup can scrape it, graph it in Grafana and alert on it.
 
 ## Features
 
-- Read-only: only `GET` requests are sent to provider APIs.
+- Read-only: only `GET` requests are sent, to provider APIs and, by default,
+  to four public status pages.
 - Poll-and-cache: scrapes never call a provider; `/metrics` reads memory.
 - Self-monitoring metrics for every poller, plus request and build metrics.
 - Configuration from environment variables only; secrets also accepted as files.
@@ -119,8 +120,9 @@ page name. Metrics are listed in the [metric reference](#metric-reference).
 | `YAGURA_STATUSPAGE_EXTRA_PAGES` | empty | Same format, appended to the list |
 | `YAGURA_STATUSPAGE_INTERVAL` | `1m` | Poll interval (minimum 30s) |
 
-Names must match `^[a-z0-9_]+$` and be unique; URLs are `http` or `https`
-without query or fragment. Some pages only serve `status.json`: when the
+Names must match `^[a-z0-9_]+$` and be unique; URLs must be `https`
+without query or fragment. Redirects are not followed, so use the final URL of
+the page. Some pages only serve `status.json`: when the
 incidents or maintenances endpoint is missing, the matching metric is omitted
 for that page and the poll still succeeds.
 
@@ -142,7 +144,10 @@ default intervals. Beyond that, raise the poll intervals.
 - Read-only: only `GET` requests are sent to provider APIs. A guard enforces
   this on every request. When an HTTPS proxy is configured, the transport
   opens a `CONNECT` tunnel to that proxy.
-- Requests go to the provider's API only, through `HTTPS_PROXY` / `HTTP_PROXY`
+- Requests go to the provider APIs you configure. By default yagura also
+  requests four public status pages (no credentials, https only); disable this
+  with `YAGURA_STATUSPAGE_ENABLED=false` or replace the list with
+  `YAGURA_STATUSPAGE_PAGES`. Requests go through `HTTPS_PROXY` / `HTTP_PROXY`
   if the operator sets them.
 - Tokens are read from the environment or from `_FILE` files, re-read on each
   poll, and never logged.
