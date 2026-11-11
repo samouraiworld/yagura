@@ -13,11 +13,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
-	"github.com/samourai-crew/yagura/internal/config"
-	"github.com/samourai-crew/yagura/internal/httpx"
-	"github.com/samourai-crew/yagura/internal/poller"
-	"github.com/samourai-crew/yagura/internal/server"
-	"github.com/samourai-crew/yagura/internal/version"
+	"github.com/samouraiworld/yagura/internal/config"
+	"github.com/samouraiworld/yagura/internal/httpx"
+	"github.com/samouraiworld/yagura/internal/poller"
+	"github.com/samouraiworld/yagura/internal/server"
+	"github.com/samouraiworld/yagura/internal/version"
 )
 
 func main() {

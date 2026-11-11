@@ -9,7 +9,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/samourai-crew/yagura/internal/httpx"
+	"github.com/samouraiworld/yagura/internal/httpx"
 )
 
 // itemConcurrency bounds the per-item requests of one poll.

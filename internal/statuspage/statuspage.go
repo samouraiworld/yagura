@@ -11,8 +11,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/samourai-crew/yagura/internal/httpx"
-	"github.com/samourai-crew/yagura/internal/poller"
+	"github.com/samouraiworld/yagura/internal/httpx"
+	"github.com/samouraiworld/yagura/internal/poller"
 )
 
 const (

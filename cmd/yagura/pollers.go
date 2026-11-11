@@ -5,10 +5,10 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/samourai-crew/yagura/internal/config"
-	"github.com/samourai-crew/yagura/internal/httpx"
-	"github.com/samourai-crew/yagura/internal/poller"
-	"github.com/samourai-crew/yagura/internal/statuspage"
+	"github.com/samouraiworld/yagura/internal/config"
+	"github.com/samouraiworld/yagura/internal/httpx"
+	"github.com/samouraiworld/yagura/internal/poller"
+	"github.com/samouraiworld/yagura/internal/statuspage"
 )
 
 // deps holds what provider pollers need to be built.

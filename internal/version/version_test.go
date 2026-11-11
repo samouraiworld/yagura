@@ -7,7 +7,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/samourai-crew/yagura/internal/version"
+	"github.com/samouraiworld/yagura/internal/version"
 )
 
 func TestBuildInfo(t *testing.T) {
@@ -21,7 +21,7 @@ yagura_build_info{goversion="` + runtime.Version() + `",revision="unknown",versi
 }
 
 func TestUserAgent(t *testing.T) {
-	const want = "yagura/dev (+https://github.com/samourai-crew/yagura)"
+	const want = "yagura/dev (+https://github.com/samouraiworld/yagura)"
 	if got := version.UserAgent(); !strings.HasPrefix(got, want) {
 		t.Fatalf("UserAgent() = %q, want prefix %q", got, want)
 	}

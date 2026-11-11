@@ -1,4 +1,4 @@
-module github.com/samourai-crew/yagura
+module github.com/samouraiworld/yagura
 
 go 1.26.0
 

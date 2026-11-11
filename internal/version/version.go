@@ -15,7 +15,7 @@ var (
 
 // UserAgent returns the User-Agent header value sent on outbound requests.
 func UserAgent() string {
-	return "yagura/" + Version + " (+https://github.com/samourai-crew/yagura)"
+	return "yagura/" + Version + " (+https://github.com/samouraiworld/yagura)"
 }
 
 // NewCollector returns a collector emitting yagura_build_info with value 1.

@@ -20,10 +20,10 @@ VictoriaMetrics setup can scrape it, graph it in Grafana and alert on it.
 ## Quick start
 
 The image is built from this repository (`make docker`). Once published it
-will be available as `ghcr.io/samourai-crew/yagura:latest`.
+will be available as `ghcr.io/samouraiworld/yagura:latest`.
 
 ```sh
-docker run -p 10100:10100 --env-file .env ghcr.io/samourai-crew/yagura:latest
+docker run -p 10100:10100 --env-file .env ghcr.io/samouraiworld/yagura:latest
 ```
 
 With Docker Compose, use the provided `docker-compose.yml`:

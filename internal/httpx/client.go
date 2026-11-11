@@ -19,7 +19,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/time/rate"
 
-	"github.com/samourai-crew/yagura/internal/version"
+	"github.com/samouraiworld/yagura/internal/version"
 )
 
 const maxBodyBytes = 10 << 20

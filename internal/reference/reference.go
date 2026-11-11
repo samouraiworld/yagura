@@ -5,8 +5,8 @@ package reference
 import (
 	"slices"
 
-	"github.com/samourai-crew/yagura/internal/poller"
-	"github.com/samourai-crew/yagura/internal/statuspage"
+	"github.com/samouraiworld/yagura/internal/poller"
+	"github.com/samouraiworld/yagura/internal/statuspage"
 )
 
 // MetricNames returns the sorted, de-duplicated names of every metric yagura

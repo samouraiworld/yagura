@@ -10,13 +10,13 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath \
     -ldflags "-s -w \
-    -X github.com/samourai-crew/yagura/internal/version.Version=$VERSION \
-    -X github.com/samourai-crew/yagura/internal/version.Revision=$REVISION" \
+    -X github.com/samouraiworld/yagura/internal/version.Version=$VERSION \
+    -X github.com/samouraiworld/yagura/internal/version.Revision=$REVISION" \
     -o /out/yagura ./cmd/yagura
 
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 ARG VERSION=dev
-LABEL org.opencontainers.image.source="https://github.com/samourai-crew/yagura" \
+LABEL org.opencontainers.image.source="https://github.com/samouraiworld/yagura" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="$VERSION"
 COPY --from=builder /out/yagura /yagura

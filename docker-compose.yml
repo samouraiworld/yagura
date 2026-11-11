@@ -1,6 +1,6 @@
 services:
   yagura:
-    image: ghcr.io/samourai-crew/yagura:latest
+    image: ghcr.io/samouraiworld/yagura:latest
     build: .
     env_file: .env
     ports:

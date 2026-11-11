@@ -12,7 +12,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/samourai-crew/yagura/internal/httpx"
+	"github.com/samouraiworld/yagura/internal/httpx"
 )
 
 func metric(t *testing.T, name string) prometheus.Metric {

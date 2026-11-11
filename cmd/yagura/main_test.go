@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/samourai-crew/yagura/internal/config"
-	"github.com/samourai-crew/yagura/internal/httpx"
+	"github.com/samouraiworld/yagura/internal/config"
+	"github.com/samouraiworld/yagura/internal/httpx"
 )
 
 func TestRunConfigError(t *testing.T) {

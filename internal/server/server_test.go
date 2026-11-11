@@ -11,7 +11,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/samourai-crew/yagura/internal/version"
+	"github.com/samouraiworld/yagura/internal/version"
 )
 
 func get(t *testing.T, h http.Handler, path string) (int, string) {
