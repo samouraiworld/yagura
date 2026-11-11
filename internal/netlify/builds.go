@@ -25,9 +25,9 @@ type account struct {
 
 type buildStatus struct {
 	Minutes *struct {
-		Current         *float64 `json:"current"`
-		IncludedMinutes string   `json:"included_minutes"`
-		PeriodEndDate   string   `json:"period_end_date"`
+		Current         *float64        `json:"current"`
+		IncludedMinutes json.RawMessage `json:"included_minutes"`
+		PeriodEndDate   string          `json:"period_end_date"`
 	} `json:"minutes"`
 }
 
@@ -141,7 +141,7 @@ func (p *buildsPoller) status(ctx context.Context, a account) ([]prometheus.Metr
 		p.logger.Warn("netlify build status has no current minutes; series omitted", "account_id", a.ID)
 		incomplete = true
 	}
-	if inc, err := strconv.ParseFloat(m.IncludedMinutes, 64); err == nil && !math.IsNaN(inc) && !math.IsInf(inc, 0) && inc >= 0 {
+	if inc, ok := parseIncluded(m.IncludedMinutes); ok {
 		out = append(out, gauge(buildIncludedDesc, inc, a.Slug))
 	}
 	if end, err := time.Parse(time.RFC3339, m.PeriodEndDate); err == nil {
@@ -154,4 +154,18 @@ func (p *buildsPoller) status(ctx context.Context, a account) ([]prometheus.Metr
 		return out, fmt.Errorf("netlify build status of %s is incomplete: %w", a.ID, poller.ErrItemSkipped)
 	}
 	return out, nil
+}
+
+// parseIncluded reads included_minutes, sent as a JSON string or number. Null,
+// absent, empty, unparsable, NaN, infinite and negative values report false.
+func parseIncluded(raw json.RawMessage) (float64, bool) {
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		text = string(raw) // not a string: a number, or something ParseFloat rejects
+	}
+	v, err := strconv.ParseFloat(text, 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+		return 0, false
+	}
+	return v, true
 }

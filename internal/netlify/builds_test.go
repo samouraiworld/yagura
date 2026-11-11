@@ -63,6 +63,9 @@ func TestBuildMinutesIncludedUnparsable(t *testing.T) {
 		"unlimited": {Body: `[{"minutes":{"current":120,"included_minutes":"unlimited","period_end_date":"2026-02-01T00:00:00Z"}}]`},
 		"negative":  {Body: `[{"minutes":{"current":120,"included_minutes":"-5","period_end_date":"2026-02-01T00:00:00Z"}}]`},
 		"nan":       {Body: `[{"minutes":{"current":120,"included_minutes":"NaN","period_end_date":"2026-02-01T00:00:00Z"}}]`},
+		"null":      {Body: `[{"minutes":{"current":120,"included_minutes":null,"period_end_date":"2026-02-01T00:00:00Z"}}]`},
+		"absent":    {Body: `[{"minutes":{"current":120,"period_end_date":"2026-02-01T00:00:00Z"}}]`},
+		"negnum":    {Body: `[{"minutes":{"current":120,"included_minutes":-5,"period_end_date":"2026-02-01T00:00:00Z"}}]`},
 		"inf":       {Body: `[{"minutes":{"current":120,"included_minutes":"+Inf","period_end_date":"2026-02-01T00:00:00Z"}}]`},
 	}
 	for name, route := range cases {
@@ -84,6 +87,22 @@ func TestBuildMinutesIncludedUnparsable(t *testing.T) {
 				t.Errorf("used and period series must remain: %v", v)
 			}
 		})
+	}
+}
+
+func TestBuildMinutesIncludedNumeric(t *testing.T) {
+	route := testkit.Route{Body: `[{"minutes":{"current":120,"included_minutes":300,"period_end_date":"2026-02-01T00:00:00Z"}}]`}
+	var logs bytes.Buffer
+	p, _ := newBuildsPoller(t, oneAccount(route), &logs)
+	res, err := poll(t, p)
+	if err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	if res.ItemErrors != 0 {
+		t.Errorf("ItemErrors = %d, want 0", res.ItemErrors)
+	}
+	if got := values(t, res)["yagura_netlify_build_minutes_included"]["demo-team"]; got != 300 {
+		t.Errorf("included = %v, want 300", got)
 	}
 }
 
