@@ -251,3 +251,94 @@ func TestStatuspageEmptyArraysAreZero(t *testing.T) {
 		hdrMaint+`yagura_statuspage_active_maintenances{provider="demo"} 0`+"\n"+
 		updated())
 }
+
+func TestStatuspageItemErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want int
+	}{
+		{"missing indicator", `{"page":{"updated_at":"2026-01-02T03:04:05.000+01:00"},"status":{}}`, 1},
+		{"empty indicator", `{"page":{"updated_at":"2026-01-02T03:04:05.000+01:00"},"status":{"indicator":""}}`, 1},
+		{"missing updated_at", `{"page":{},"status":{"indicator":"none"}}`, 1},
+		{"unparseable updated_at", `{"page":{"updated_at":"yesterday"},"status":{"indicator":"none"}}`, 1},
+		{"both missing", `{"page":{},"status":{}}`, 2},
+		{"unknown non-empty indicator", `{"page":{"updated_at":"2026-01-02T03:04:05.000+01:00"},"status":{"indicator":"maintenance"}}`, 0},
+		{"full", `{"page":{"updated_at":"2026-01-02T03:04:05.000+01:00"},"status":{"indicator":"none"}}`, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p, _ := newPoller(t, map[string]testkit.Route{
+				tStatus:    {Body: tc.body},
+				tIncidents: html404(),
+				tMaint:     html404(),
+			}, io.Discard)
+			res, err := poll(t, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.ItemErrors != tc.want {
+				t.Errorf("ItemErrors = %d, want %d", res.ItemErrors, tc.want)
+			}
+		})
+	}
+}
+
+func TestStatuspageWarningsAreBounded(t *testing.T) {
+	long := strings.Repeat("x", 5000)
+	var logs bytes.Buffer
+	p, _ := newPoller(t, map[string]testkit.Route{
+		tStatus:    {Body: `{"page":{"updated_at":"` + long + `"},"status":{"indicator":"` + long + `"}}`},
+		tIncidents: html404(),
+		tMaint:     html404(),
+	}, &logs)
+	if _, err := poll(t, p); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(logs.String()); n > 1000 {
+		t.Errorf("log output is %d bytes; remote strings must be capped", n)
+	}
+	if !strings.Contains(logs.String(), "updated_at") || !strings.Contains(logs.String(), "xxxx") {
+		t.Errorf("updated_at warning should carry a capped value:\n%s", logs.String())
+	}
+}
+
+func TestStatuspageOptionalEndpointShapes(t *testing.T) {
+	omit := indicator("0") + updated()
+	cases := []struct {
+		name    string
+		body    string
+		want    string // expected metrics when the poll succeeds
+		wantErr bool
+	}{
+		{"top-level array is not statuspage-shaped", `[]`, omit, false},
+		{"top-level string", `"none"`, omit, false},
+		{"top-level null", `null`, omit, false},
+		{"empty array", `{"incidents":[]}`, omit + hdrIncidents + `yagura_statuspage_unresolved_incidents{provider="demo"} 0` + "\n", false},
+		{"empty object", `{}`, "", true},
+		{"null array", `{"incidents":null}`, "", true},
+		{"object instead of array", `{"incidents":{}}`, "", true},
+		{"string instead of array", `{"incidents":"none"}`, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			p, _ := newPoller(t, map[string]testkit.Route{
+				tStatus:    fixture("status_none.json"),
+				tIncidents: {Body: tc.body},
+				tMaint:     html404(),
+			}, &logs)
+			res, err := poll(t, p)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("want an error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			compare(t, res, tc.want)
+		})
+	}
+}
