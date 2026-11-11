@@ -1,0 +1,29 @@
+{
+  "consumptions": [
+    {
+      "value": {"currency_code": "EUR", "units": 0, "nanos": 250000000},
+      "product_name": "demo-product",
+      "resource_name": "demo-resource-3",
+      "sku": "demo/sku/1",
+      "project_id": "00000000-0000-0000-0000-000000000001",
+      "project_name": "demo-project",
+      "category_name": "Compute",
+      "unit": "hour",
+      "billed_quantity": "2"
+    },
+    {
+      "value": {"currency_code": "EUR", "units": 1, "nanos": 0},
+      "product_name": "demo-product",
+      "resource_name": "demo-resource-4",
+      "sku": "demo/sku/1",
+      "project_id": "00000000-0000-0000-0000-000000000002",
+      "project_name": "demo-project-2",
+      "category_name": "Compute",
+      "unit": "hour",
+      "billed_quantity": "8"
+    }
+  ],
+  "total_count": 5,
+  "total_discount_untaxed_value": 0,
+  "updated_at": "2026-11-05T08:30:00Z"
+}

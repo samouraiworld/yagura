@@ -1,0 +1,40 @@
+{
+  "consumptions": [
+    {
+      "value": {"currency_code": "EUR", "units": 1, "nanos": 500000000},
+      "product_name": "demo-product",
+      "resource_name": "demo-resource-1",
+      "sku": "demo/sku/1",
+      "project_id": "00000000-0000-0000-0000-000000000001",
+      "project_name": "demo-project",
+      "category_name": "Compute",
+      "unit": "hour",
+      "billed_quantity": "10"
+    },
+    {
+      "value": {"currency_code": "EUR", "units": 2, "nanos": 250000000},
+      "product_name": "demo-product",
+      "resource_name": "demo-resource-2",
+      "sku": "demo/sku/2",
+      "project_id": "00000000-0000-0000-0000-000000000001",
+      "project_name": "demo-project",
+      "category_name": "Compute",
+      "unit": "hour",
+      "billed_quantity": "15"
+    },
+    {
+      "value": {"currency_code": "EUR", "units": 0, "nanos": 100000000},
+      "product_name": "demo-storage",
+      "resource_name": "demo-bucket",
+      "sku": "demo/sku/3",
+      "project_id": "00000000-0000-0000-0000-000000000001",
+      "project_name": "demo-project",
+      "category_name": "Storage",
+      "unit": "GB",
+      "billed_quantity": "1"
+    }
+  ],
+  "total_count": 5,
+  "total_discount_untaxed_value": 0,
+  "updated_at": "2026-11-05T08:30:00Z"
+}
