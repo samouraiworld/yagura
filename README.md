@@ -246,8 +246,8 @@ IDs and what each one has cost this month. Turn on the web config (TLS, basic
 auth) or keep the port reachable only by your Prometheus server.
 
 The `YaguraMonthlyCostOverBudget` alert fires when the month-to-date total of
-a currency, for one yagura instance, stays above 100 for an hour. 100 is an
-example: edit it in `alerts/yagura.rules.yml` to your budget. While polls
+a currency, for one yagura instance, stays above 100 for an hour; replicas
+watching the same organization each raise it. 100 is an example: edit it in `alerts/yagura.rules.yml` to your budget. While polls
 fail, yagura keeps serving the last amount it read, so after the 1st the alert
 resolves only once a poll succeeds; `YaguraCollectorFailing` covers that case.
 
@@ -284,7 +284,10 @@ datasources:
 **Federation** (copies the series into your own Prometheus): scrape the
 Cockpit `/federate` endpoint. It is in beta: Scaleway does not bill it during
 the beta and says it may be billed afterwards. Keep `match[]` narrow, since
-every federated sample may count. Prometheus 2.55 or later (for
+every federated sample may count. Not confirmed: how far back `/federate`
+looks for the latest sample. These metrics are written once an hour, so if it
+only returns recent samples, the federated series will have gaps; the Grafana
+data source above does not have that problem. Prometheus 2.55 or later (for
 `http_headers`):
 
 ```yaml

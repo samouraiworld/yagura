@@ -191,5 +191,5 @@ tests:
               instance: demo-1.example.com:10100
               currency: EUR
             exp_annotations:
-              summary: "Scaleway month-to-date cost is over budget (EUR)"
+              summary: "Scaleway month-to-date cost is over budget (EUR, demo-1.example.com:10100)"
               description: "Scaleway consumption since the 1st of the month is 110.25 EUR, above the budget set in this alert rule."

@@ -64,7 +64,8 @@ groups:
         # month to date and resets on the 1st, so the alert resolves after
         # the first successful poll of the month (while polls fail, yagura
         # keeps the last value and YaguraCollectorFailing fires). Each
-        # exporter instance, i.e. each organization, is compared on its own.
+        # exporter instance, i.e. each organization, is compared on its own;
+        # replicas of one exporter each raise the alert.
         # One threshold applies to every currency; add a currency matcher
         # (for example {currency="EUR"}) if the account bills in several.
         expr: sum without (project_id, project_name, category) (yagura_scaleway_consumption_amount) > 100
@@ -72,5 +73,5 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "Scaleway month-to-date cost is over budget ({{ $labels.currency }})"
+          summary: "Scaleway month-to-date cost is over budget ({{ $labels.currency }}, {{ $labels.instance }})"
           description: "Scaleway consumption since the 1st of the month is {{ printf \"%.2f\" $value }} {{ $labels.currency }}, above the budget set in this alert rule."

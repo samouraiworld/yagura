@@ -516,7 +516,7 @@
       "title": "Scaleway month to date by project",
       "type": "barchart",
       "datasource": "${datasource}",
-      "description": "Scaleway consumption since the 1st of the month, per project and currency, stacked by category. Resets on the 1st. A project without a name shows its ID; replicas of the same exporter are counted once. VAT inclusion is not confirmed: see the README.",
+      "description": "Scaleway consumption since the 1st of the month, per project and currency, stacked by category. Resets on the 1st. A project shows as its name and the first 8 characters of its ID, or its full ID when it has no name; replicas of the same exporter are counted once. VAT inclusion is not confirmed: see the README.",
       "gridPos": {
         "x": 0,
         "y": 24,
@@ -543,7 +543,7 @@
         {
           "refId": "A",
           "datasource": "${datasource}",
-          "expr": "sum by (project, category, currency) (label_join(label_replace(label_replace(label_join(max by (project_id, project_name, category, currency) (yagura_scaleway_consumption_amount), \"name_id\", \";\", \"project_name\", \"project_id\"), \"project\", \"$1\", \"name_id\", \"(.+);.*\"), \"project\", \"$1\", \"name_id\", \";(.+)\"), \"project\", \" \", \"project\", \"currency\"))",
+          "expr": "sum by (project, category, currency) (label_join(label_replace(label_replace(label_replace(label_replace(label_join(max by (project_id, project_name, category, currency) (yagura_scaleway_consumption_amount), \"name_id\", \";\", \"project_name\", \"project_id\"), \"project\", \"$1\", \"name_id\", \"(.+);\"), \"project\", \"$1 ($2)\", \"name_id\", \"(.+);(.{1,8}).*\"), \"project\", \"$1\", \"name_id\", \";(.+)\"), \"project\", \"(no project)\", \"name_id\", \";\"), \"project\", \" \", \"project\", \"currency\"))",
           "format": "table",
           "instant": true
         }
@@ -579,7 +579,7 @@
       "title": "Scaleway month to date total",
       "type": "stat",
       "datasource": "${datasource}",
-      "description": "Scaleway consumption since the 1st of the month, per currency. Resets on the 1st. Replicas of the same exporter are counted once.",
+      "description": "Scaleway consumption since the 1st of the month, per currency, all watched organizations together. Resets on the 1st. Replicas of the same exporter are counted once.",
       "gridPos": {
         "x": 16,
         "y": 24,
@@ -603,7 +603,8 @@
           "refId": "A",
           "datasource": "${datasource}",
           "expr": "sum by (currency) (max by (project_id, project_name, category, currency) (yagura_scaleway_consumption_amount))",
-          "legendFormat": "{{currency}}"
+          "legendFormat": "{{currency}}",
+          "instant": true
         }
       ],
       "fieldConfig": {
