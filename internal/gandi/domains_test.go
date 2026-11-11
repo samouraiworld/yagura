@@ -292,3 +292,26 @@ func TestDomainsName(t *testing.T) {
 		t.Errorf("name %q interval %v", p.Name(), p.Interval())
 	}
 }
+
+func TestDomainsIgnoresNonPositiveTotalCount(t *testing.T) {
+	for _, total := range []string{"0", "-1"} {
+		t.Run(total, func(t *testing.T) {
+			p, srv := newPoller(t, "", map[string]testkit.Route{
+				page1Key: {Body: hundred(t), Header: http.Header{"Total-Count": {total}}},
+				page2Key: {File: "testdata/domains_page2.json"},
+			}, &bytes.Buffer{})
+			res, err := poll(t, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, key := range []string{page1Key, page2Key} {
+				if got := testkit.Hits(srv, key); got != 1 {
+					t.Errorf("%s requests = %d, want 1", key, got)
+				}
+			}
+			if got := len(values(t, res)[MetricNames[0]]); got != 102 {
+				t.Errorf("expiry series = %d, want 102", got)
+			}
+		})
+	}
+}

@@ -104,7 +104,7 @@ func (p *domainsPoller) Poll(ctx context.Context) (poller.Result, error) {
 
 // list returns the raw domain entries of every page. It stops at a page with
 // fewer than pageSize items, or once the raw count reaches the Total-Count
-// header (when present and numeric); httpx.MaxPages pages without a stop is
+// header (when present, numeric and positive); httpx.MaxPages pages without a stop is
 // an error.
 func (p *domainsPoller) list(ctx context.Context) ([]json.RawMessage, error) {
 	var all []json.RawMessage
@@ -127,7 +127,7 @@ func (p *domainsPoller) list(ctx context.Context) ([]json.RawMessage, error) {
 		if len(items) < pageSize {
 			return all, nil
 		}
-		if total, err := strconv.Atoi(hdr.Get("Total-Count")); err == nil && len(all) >= total {
+		if total, err := strconv.Atoi(hdr.Get("Total-Count")); err == nil && total > 0 && len(all) >= total {
 			return all, nil
 		}
 	}

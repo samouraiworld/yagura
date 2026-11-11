@@ -21,6 +21,6 @@ var (
 		"Prepaid balance below which Gandi sends a warning, in the currency of the label.", []string{"currency"}, nil)
 )
 
-func gauge(d *prometheus.Desc, v float64, domain string) prometheus.Metric {
-	return prometheus.MustNewConstMetric(d, prometheus.GaugeValue, v, domain)
+func gauge(d *prometheus.Desc, v float64, label string) prometheus.Metric {
+	return prometheus.MustNewConstMetric(d, prometheus.GaugeValue, v, label)
 }
