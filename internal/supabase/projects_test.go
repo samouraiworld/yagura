@@ -26,6 +26,11 @@ const (
 	healthKeyA  = "GET " + healthPathA + "?services=auth%2Cdb%2Cpooler%2Crealtime%2Crest%2Cstorage&timeout_ms=5000"
 )
 
+const twoActiveProjects = `[
+	  {"ref":"` + refA + `","name":"demo-app","organization_slug":"demo-org","region":"eu-west-1","status":"ACTIVE_HEALTHY"},
+	  {"ref":"` + refB + `","name":"demo-other","organization_slug":"demo-org","region":"eu-west-1","status":"ACTIVE_HEALTHY"}
+	]`
+
 var testServices = []string{"auth", "db", "pooler", "realtime", "rest", "storage"}
 
 func TestMain(m *testing.M) {
@@ -143,18 +148,18 @@ func TestProjectsHealth(t *testing.T) {
 }
 
 func TestProjectsHealthCallFails(t *testing.T) {
-	body := `[
-	  {"ref":"` + refA + `","name":"demo-app","organization_slug":"demo-org","region":"eu-west-1","status":"ACTIVE_HEALTHY"},
-	  {"ref":"` + refB + `","name":"demo-other","organization_slug":"demo-org","region":"eu-west-1","status":"ACTIVE_HEALTHY"}
-	]`
+	var logs bytes.Buffer
 	p, _ := newPoller(t, map[string]testkit.Route{
-		"/v1/projects": {Body: body},
+		"/v1/projects": {Body: twoActiveProjects},
 		healthPathA:    {Status: 500, Body: `{"message":"demo failure"}`},
 		healthPathB:    {File: "testdata/health_ok.json"},
-	}, &bytes.Buffer{})
+	}, &logs)
 	res, err := poll(t, p)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if out := logs.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, "supabase health call failed") || !strings.Contains(out, "project_ref="+refA) {
+		t.Errorf("no warning naming %s: %s", refA, out)
 	}
 	health := values(t, res)[MetricNames[2]]
 	for _, s := range testServices {
@@ -167,6 +172,34 @@ func TestProjectsHealthCallFails(t *testing.T) {
 	}
 	if res.ItemErrors != 1 {
 		t.Errorf("ItemErrors = %d, want 1", res.ItemErrors)
+	}
+}
+
+func TestProjectsHealthGone(t *testing.T) {
+	var logs bytes.Buffer
+	p, _ := newPoller(t, map[string]testkit.Route{
+		"/v1/projects": {Body: twoActiveProjects},
+		healthPathA:    {Status: 404, Body: `{"message":"not found"}`},
+		healthPathB:    {File: "testdata/health_ok.json"},
+	}, &logs)
+	res, err := poll(t, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	health := values(t, res)[MetricNames[2]]
+	for _, s := range testServices {
+		if _, ok := health[refA+"|"+s]; ok {
+			t.Errorf("series emitted for the gone project: %s", s)
+		}
+		if got, ok := health[refB+"|"+s]; !ok || got != 1 {
+			t.Errorf("%s = %v (present %v), want 1", s, got, ok)
+		}
+	}
+	if res.ItemErrors != 0 {
+		t.Errorf("ItemErrors = %d, want 0", res.ItemErrors)
+	}
+	if out := logs.String(); !strings.Contains(out, "level=DEBUG") || !strings.Contains(out, "project gone") || !strings.Contains(out, "project_ref="+refA) {
+		t.Errorf("no debug line naming %s: %s", refA, out)
 	}
 }
 

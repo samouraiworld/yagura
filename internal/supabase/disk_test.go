@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"log/slog"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,11 +16,6 @@ import (
 const (
 	diskPathA = "/v1/projects/" + refA + "/config/disk/util"
 	diskPathB = "/v1/projects/" + refB + "/config/disk/util"
-
-	twoActiveProjects = `[
-	  {"ref":"` + refA + `","name":"demo-app","organization_slug":"demo-org","region":"eu-west-1","status":"ACTIVE_HEALTHY"},
-	  {"ref":"` + refB + `","name":"demo-other","organization_slug":"demo-org","region":"eu-west-1","status":"ACTIVE_HEALTHY"}
-	]`
 )
 
 func newDiskPoller(t *testing.T, routes map[string]testkit.Route, logs *bytes.Buffer) (poller.Poller, *httptest.Server) {
@@ -83,14 +79,18 @@ func TestDiskSkipsInactive(t *testing.T) {
 }
 
 func TestDiskItemFailure(t *testing.T) {
+	var logs bytes.Buffer
 	p, _ := newDiskPoller(t, map[string]testkit.Route{
 		"/v1/projects": {Body: twoActiveProjects},
 		diskPathA:      {Status: 500, Body: `{"message":"demo failure"}`},
 		diskPathB:      {File: "testdata/disk_util.json"},
-	}, &bytes.Buffer{})
+	}, &logs)
 	res, err := poll(t, p)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if out := logs.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, "supabase disk call failed") || !strings.Contains(out, "project_ref="+refA) {
+		t.Errorf("no warning naming %s: %s", refA, out)
 	}
 	v := values(t, res)
 	for i := 3; i < 6; i++ {

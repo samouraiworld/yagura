@@ -36,13 +36,7 @@ func (p *diskPoller) Poll(ctx context.Context) (poller.Result, error) {
 	if err != nil {
 		return poller.Result{}, err
 	}
-	var active []project
-	for _, pr := range projects {
-		if pr.isActive() {
-			active = append(active, pr)
-		}
-	}
-	metrics, n, err := poller.RunItems(ctx, active, p.disk)
+	metrics, n, err := poller.RunItems(ctx, activeProjects(projects), p.disk)
 	if err != nil {
 		return poller.Result{}, err
 	}
@@ -62,7 +56,9 @@ type diskUtil struct {
 func (p *diskPoller) disk(ctx context.Context, pr project) ([]prometheus.Metric, error) {
 	var d diskUtil
 	if _, err := p.client.GetJSON(ctx, projectsPath+"/"+pr.Ref+diskPathSuffix, nil, &d); err != nil {
-		return nil, fmt.Errorf("supabase disk of %s: %w", pr.Ref, err)
+		err = fmt.Errorf("supabase disk of %s: %w", pr.Ref, err)
+		logItemError(ctx, p.logger, "disk", pr.Ref, err)
+		return nil, err
 	}
 	if d.Metrics == nil {
 		return nil, fmt.Errorf("supabase disk of %s: response has no metrics object", pr.Ref)

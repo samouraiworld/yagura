@@ -45,6 +45,30 @@ func (p project) isActive() bool {
 	return p.Status == "ACTIVE_HEALTHY" || p.Status == "ACTIVE_UNHEALTHY"
 }
 
+// activeProjects returns the projects that run.
+func activeProjects(ps []project) []project {
+	var out []project
+	for _, pr := range ps {
+		if pr.isActive() {
+			out = append(out, pr)
+		}
+	}
+	return out
+}
+
+// logItemError logs the failure of one per-project call: a gone project at
+// debug level, other failures as warnings. Auth errors, skipped items (which
+// log their own warning) and errors after cancellation are not logged.
+func logItemError(ctx context.Context, logger *slog.Logger, what string, ref string, err error) {
+	switch {
+	case httpx.IsNotFound(err):
+		logger.Debug("supabase project gone; "+what+" omitted", "project_ref", ref)
+	case httpx.IsAuthError(err), errors.Is(err, poller.ErrItemSkipped), ctx.Err() != nil:
+	default:
+		logger.Warn("supabase "+what+" call failed", "project_ref", ref, "error", capped(err.Error()))
+	}
+}
+
 // validRef reports whether ref is safe to put in a URL path.
 func validRef(ref string) bool {
 	if ref == "" || len(ref) > 64 {
@@ -132,7 +156,6 @@ func (p *projectsPoller) Poll(ctx context.Context) (poller.Result, error) {
 	}
 
 	var metrics []prometheus.Metric
-	var active []project
 	for _, pr := range projects {
 		metrics = append(metrics, gauge(infoDesc, 1, pr.Ref, pr.Name, pr.OrganizationSlug, pr.Region))
 		known := slices.Contains(ProjectStatuses, pr.Status)
@@ -149,12 +172,9 @@ func (p *projectsPoller) Poll(ctx context.Context) (poller.Result, error) {
 			metrics = append(metrics, gauge(statusDesc, 1, pr.Ref, pr.Status))
 			itemErrors++
 		}
-		if pr.isActive() {
-			active = append(active, pr)
-		}
 	}
 
-	health, n, err := poller.RunItems(ctx, active, p.health)
+	health, n, err := poller.RunItems(ctx, activeProjects(projects), p.health)
 	metrics = append(metrics, health...)
 	itemErrors += n
 	if err != nil {
@@ -182,6 +202,7 @@ func (p *projectsPoller) health(ctx context.Context, pr project) ([]prometheus.M
 	}
 	if err != nil {
 		err = fmt.Errorf("supabase health of %s: %w", pr.Ref, err)
+		logItemError(ctx, p.logger, "health", pr.Ref, err)
 		if httpx.IsAuthError(err) || httpx.IsNotFound(err) {
 			return nil, err
 		}
