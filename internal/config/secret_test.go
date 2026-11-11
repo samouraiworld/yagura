@@ -2,7 +2,9 @@ package config
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -155,5 +157,9 @@ func TestSecretFileErrorHidesPath(t *testing.T) {
 				t.Fatalf("error echoes the path: %v", err)
 			}
 		})
+	}
+	s, _ := secret(mapLookup(map[string]string{"X_FILE": "s3cretpw-not-a-path"}), "X")
+	if _, err := s.Read(); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("errors.Is(err, fs.ErrNotExist) = false for %v", err)
 	}
 }

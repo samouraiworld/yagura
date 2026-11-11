@@ -179,8 +179,9 @@ against yagura, not against someone who obtains the token. Keep the token in
 a file or a secret store, restrict it to one organization and give it an
 expiry.
 
-With this collector on, `/metrics` shows every domain name of the
-organization and its prepaid balance. Turn on the web config (TLS, basic
+With this collector on, `/metrics` shows every domain name the token can see
+(only the organization's when `YAGURA_GANDI_SHARING_ID` is set) and the
+prepaid balance. Turn on the web config (TLS, basic
 auth) or keep the port reachable only by your Prometheus server.
 
 For domains held at other registrars, use a WHOIS-based exporter such as

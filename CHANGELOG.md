@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Configuration errors no longer repeat the offending value or the secret file path, so a token set in the wrong variable cannot reach the logs.
+- Errors about `YAGURA_*` log, boolean, duration and secret variables no longer repeat the offending value or the secret file path, so a token set in one of them by mistake cannot reach the logs.
 
 ## [0.1.0] - 2026-11-11
 
