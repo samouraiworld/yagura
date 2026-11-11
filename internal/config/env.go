@@ -44,7 +44,8 @@ func duration(lookup LookupFunc, name string, def time.Duration) (time.Duration,
 	}
 	d, err := time.ParseDuration(strings.TrimSpace(v))
 	if err != nil {
-		return 0, fmt.Errorf("%s: invalid duration: %w", name, err)
+		// The value is not echoed: it may be a token set in the wrong variable.
+		return 0, fmt.Errorf("%s: invalid duration; use Go syntax such as 30s, 5m or 6h", name)
 	}
 	if d < minInterval {
 		return 0, fmt.Errorf("%s: must be at least 30s", name)
@@ -75,7 +76,7 @@ func boolean(lookup LookupFunc, name string, def bool) (bool, error) {
 	}
 	b, err := strconv.ParseBool(strings.TrimSpace(v))
 	if err != nil {
-		return false, fmt.Errorf("%s: invalid boolean %q", name, v)
+		return false, fmt.Errorf("%s: invalid boolean; use true or false", name)
 	}
 	return b, nil
 }

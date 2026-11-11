@@ -47,6 +47,68 @@ func TestBuildPollersStatuspage(t *testing.T) {
 	}
 }
 
+func TestBuildPollersGandi(t *testing.T) {
+	cfg, err := config.Load(func(k string) (string, bool) {
+		switch k {
+		case "YAGURA_GANDI_TOKEN":
+			return "test-token", true
+		case "YAGURA_STATUSPAGE_ENABLED":
+			return "false", true
+		}
+		return "", false
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps, err := buildPollers(cfg, deps{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), requests: httpx.NewRequestsCounter()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, p := range ps {
+		got = append(got, p.Name())
+	}
+	want := []string{"gandi_domains", "gandi_billing"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+// attrRecorder is a slog.Handler that records the attributes bound with
+// Logger.With, so a test can see what a poller's logger carries.
+type attrRecorder struct {
+	slog.Handler
+	attrs *[]slog.Attr
+}
+
+func (h attrRecorder) WithAttrs(as []slog.Attr) slog.Handler {
+	*h.attrs = append(*h.attrs, as...)
+	return h
+}
+
+func TestBuildPollersGandiLoggerProvider(t *testing.T) {
+	cfg, err := config.Load(func(k string) (string, bool) {
+		switch k {
+		case "YAGURA_GANDI_TOKEN":
+			return "test-token", true
+		case "YAGURA_STATUSPAGE_ENABLED":
+			return "false", true
+		}
+		return "", false
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attrs []slog.Attr
+	logger := slog.New(attrRecorder{Handler: slog.NewTextHandler(io.Discard, nil), attrs: &attrs})
+	if _, err := buildPollers(cfg, deps{logger: logger, requests: httpx.NewRequestsCounter()}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(attrs, func(a slog.Attr) bool { return a.Equal(slog.String("provider", "gandi")) }) {
+		t.Fatalf("gandi logger attributes = %v, want provider=gandi", attrs)
+	}
+}
+
 func TestMain(m *testing.M) {
 	httpx.SetDialGuard(httpx.LoopbackOnly)
 	os.Exit(m.Run())

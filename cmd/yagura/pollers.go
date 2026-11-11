@@ -6,6 +6,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/samouraiworld/yagura/internal/config"
+	"github.com/samouraiworld/yagura/internal/gandi"
 	"github.com/samouraiworld/yagura/internal/httpx"
 	"github.com/samouraiworld/yagura/internal/poller"
 	"github.com/samouraiworld/yagura/internal/statuspage"
@@ -31,6 +32,21 @@ func buildPollers(cfg *config.Config, d deps) ([]poller.Poller, error) {
 			})
 			pollers = append(pollers, statuspage.NewPoller(page.Name, client, cfg.Statuspage.Interval, d.logger))
 		}
+	}
+	if g := cfg.Gandi; g != nil {
+		client := httpx.New(httpx.Options{
+			Provider:  "gandi",
+			BaseURL:   "https://api.gandi.net",
+			Auth:      httpx.BearerAuth(g.Token.Read),
+			RateLimit: 5,
+			Burst:     5,
+			Requests:  d.requests,
+		})
+		logger := d.logger.With("provider", "gandi")
+		pollers = append(pollers,
+			gandi.NewDomainsPoller(client, g.SharingID, g.DomainsInterval, logger),
+			gandi.NewBillingPoller(client, g.SharingID, g.BillingInterval, logger),
+		)
 	}
 	return pollers, nil
 }

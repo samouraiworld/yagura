@@ -84,3 +84,24 @@ func TestBoolean(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestErrorsDoNotEchoValues(t *testing.T) {
+	for _, name := range []string{
+		"YAGURA_LOG_LEVEL",
+		"YAGURA_LOG_FORMAT",
+		"YAGURA_STATUSPAGE_ENABLED",
+		"YAGURA_STATUSPAGE_INTERVAL",
+		"YAGURA_GANDI_DOMAINS_INTERVAL",
+		"YAGURA_GANDI_BILLING_INTERVAL",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load(mapLookup(map[string]string{"YAGURA_GANDI_TOKEN": "test-token", name: "s3cretpw"}))
+			if err == nil || !strings.Contains(err.Error(), name) {
+				t.Fatalf("want error naming %s, got %v", name, err)
+			}
+			if strings.Contains(err.Error(), "s3cretpw") {
+				t.Fatalf("error echoes the value: %v", err)
+			}
+		})
+	}
+}

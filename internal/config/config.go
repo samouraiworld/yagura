@@ -2,7 +2,7 @@
 package config
 
 import (
-	"fmt"
+	"errors"
 	"log/slog"
 )
 
@@ -13,6 +13,7 @@ type Config struct {
 	LogLevel      slog.Level // YAGURA_LOG_LEVEL
 	LogFormat     string     // YAGURA_LOG_FORMAT
 	Statuspage    StatuspageConfig
+	Gandi         *GandiConfig // nil when YAGURA_GANDI_TOKEN is unset
 }
 
 // Load builds the configuration from lookup, validating every value.
@@ -37,17 +38,20 @@ func Load(lookup LookupFunc) (*Config, error) {
 		case "error":
 			c.LogLevel = slog.LevelError
 		default:
-			return nil, fmt.Errorf("YAGURA_LOG_LEVEL: %q is not one of debug, info, warn, error", v)
+			return nil, errors.New("YAGURA_LOG_LEVEL: must be one of debug, info, warn, error")
 		}
 	}
 	if v, ok := get(lookup, "YAGURA_LOG_FORMAT"); ok {
 		if v != "logfmt" && v != "json" {
-			return nil, fmt.Errorf("YAGURA_LOG_FORMAT: %q is not one of logfmt, json", v)
+			return nil, errors.New("YAGURA_LOG_FORMAT: must be one of logfmt, json")
 		}
 		c.LogFormat = v
 	}
 	var err error
 	if c.Statuspage, err = loadStatuspage(lookup); err != nil {
+		return nil, err
+	}
+	if c.Gandi, err = loadGandi(lookup); err != nil {
 		return nil, err
 	}
 	return c, nil

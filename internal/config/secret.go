@@ -1,8 +1,10 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"strings"
@@ -56,6 +58,12 @@ func (s Secret) Read() (string, error) {
 	if d.file != "" {
 		b, err := readSecretFile(d.file)
 		if err != nil {
+			// Drop the path: a token set as X_FILE by mistake would
+			// otherwise reach the logs on every poll.
+			var pe *fs.PathError
+			if errors.As(err, &pe) {
+				err = pe.Err
+			}
 			return "", fmt.Errorf("%s: cannot read secret file: %w", d.name, err)
 		}
 		if len(b) > maxSecretFileBytes {
