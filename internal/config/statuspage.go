@@ -44,7 +44,15 @@ func loadStatuspage(lookup LookupFunc) (StatuspageConfig, error) {
 		{"YAGURA_STATUSPAGE_PAGES", defaultStatuspagePages},
 		{"YAGURA_STATUSPAGE_EXTRA_PAGES", ""},
 	} {
-		for i, entry := range list(lookup, v.name, v.def) {
+		raw, ok := get(lookup, v.name)
+		if !ok {
+			raw = v.def
+		}
+		for i, entry := range strings.Split(raw, ",") {
+			// Number by raw comma position; empty entries count but are skipped.
+			if entry = strings.TrimSpace(entry); entry == "" {
+				continue
+			}
 			page, err := parsePage(entry, i+1)
 			if err != nil {
 				return StatuspageConfig{}, fmt.Errorf("%s: %w", v.name, err)

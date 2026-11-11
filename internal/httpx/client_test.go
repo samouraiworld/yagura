@@ -12,6 +12,7 @@ import (
 	"testing"
 	"testing/synctest"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
@@ -228,5 +229,13 @@ func TestRequestsCounterBoundsCodeLabel(t *testing.T) {
 		if n := testutil.CollectAndCount(counter); n != 1 {
 			t.Errorf("status %d: %d series, want 1", tc.code, n)
 		}
+	}
+}
+
+func TestRequestsCounterHelpMentionsInvalid(t *testing.T) {
+	ch := make(chan *prometheus.Desc, 1)
+	NewRequestsCounter().Describe(ch)
+	if d := (<-ch).String(); !strings.Contains(d, "invalid") {
+		t.Errorf("help does not mention invalid: %s", d)
 	}
 }

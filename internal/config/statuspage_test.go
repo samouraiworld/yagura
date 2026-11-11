@@ -78,6 +78,7 @@ func TestStatuspageValidation(t *testing.T) {
 		{"port only", map[string]string{"YAGURA_STATUSPAGE_PAGES": "a=https://:443"}, "must use https"},
 		{"credentials without name", map[string]string{"YAGURA_STATUSPAGE_PAGES": "https://user:s3cretpw@status.example.com"}, "entry 1: not in the form name=url"},         //nolint:gosec // fake credential, asserts rejection
 		{"credentials without name, query", map[string]string{"YAGURA_STATUSPAGE_PAGES": "https://user:s3cretpw@status.example.com/?x=1"}, "entry 1: page name must match"}, //nolint:gosec // fake credential, asserts rejection
+		{"raw position counts empty entries", map[string]string{"YAGURA_STATUSPAGE_PAGES": ",bad"}, "entry 2: not in the form"},
 		{"bad name position", map[string]string{"YAGURA_STATUSPAGE_PAGES": "a=https://a.example.com,Bad=https://b.example.com"}, "entry 2: page name must match"},
 		{"query", map[string]string{"YAGURA_STATUSPAGE_PAGES": "a=https://a.example.com/?x=1"}, "YAGURA_STATUSPAGE_PAGES"},
 		{"userinfo", map[string]string{"YAGURA_STATUSPAGE_PAGES": "a=https://user:s3cretpw@a.example.com"}, "YAGURA_STATUSPAGE_PAGES"}, //nolint:gosec // fake credential, asserts rejection

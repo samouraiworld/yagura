@@ -120,6 +120,9 @@ page name. Metrics are listed in the [metric reference](#metric-reference).
 | `YAGURA_STATUSPAGE_EXTRA_PAGES` | empty | Same format, appended to the list |
 | `YAGURA_STATUSPAGE_INTERVAL` | `1m` | Poll interval (minimum 30s) |
 
+An unknown or missing indicator is exported as `-1` and counts in
+`yagura_collector_last_item_errors`.
+
 Names must match `^[a-z0-9_]+$` and be unique; URLs must be `https`
 without query or fragment. Redirects are not followed, so use the final URL of
 the page. Some pages only serve `status.json`: when the

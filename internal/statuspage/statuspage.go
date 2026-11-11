@@ -54,8 +54,8 @@ func (p *statusPoller) Poll(ctx context.Context) (poller.Result, error) {
 		return poller.Result{}, fmt.Errorf("statuspage %s: status: %w", p.name, err)
 	}
 	var itemErrors int
-	if st.Status.Indicator == "" {
-		itemErrors++ // a required field is missing: alertable through the item-error gauge
+	if !knownIndicator(st.Status.Indicator) {
+		itemErrors++ // missing or unknown: alertable through the item-error gauge
 	}
 	metrics := []prometheus.Metric{gauge(indicatorDesc, p.indicatorValue(st.Status.Indicator), p.name)}
 	if st.Page.UpdatedAt == "" {
@@ -106,7 +106,7 @@ func (p *statusPoller) optionalCount(ctx context.Context, path, key string) (n i
 		p.logger.Debug("statuspage optional endpoint is not a JSON object; metric omitted", "provider", p.name, "path", path)
 		return 0, false, nil
 	}
-	var items []struct{}
+	var items []json.RawMessage
 	if err := json.Unmarshal(obj[key], &items); err != nil || items == nil {
 		return 0, false, fmt.Errorf("statuspage %s: %s: missing %q array", p.name, path, key)
 	}
@@ -137,4 +137,12 @@ func (p *statusPoller) indicatorValue(s string) float64 {
 	}
 	p.logger.Warn("statuspage unknown indicator", "provider", p.name, "indicator", capped(s))
 	return -1
+}
+
+func knownIndicator(s string) bool {
+	switch s {
+	case "none", "minor", "major", "critical":
+		return true
+	}
+	return false
 }

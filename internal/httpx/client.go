@@ -110,7 +110,7 @@ func newClient(opts Options, base http.RoundTripper) *Client {
 func NewRequestsCounter() *prometheus.CounterVec {
 	return prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "yagura_api_requests_total",
-		Help: "Outbound API requests by provider and HTTP status code (\"error\" when no response was received).",
+		Help: "Outbound API requests by provider and HTTP status code (\"error\" when no response was received, \"invalid\" for a status outside 100-599).",
 	}, []string{"provider", "code"})
 }
 
