@@ -79,28 +79,36 @@ func TestDiskSkipsInactive(t *testing.T) {
 }
 
 func TestDiskItemFailure(t *testing.T) {
-	var logs bytes.Buffer
-	p, _ := newDiskPoller(t, map[string]testkit.Route{
-		"/v1/projects": {Body: twoActiveProjects},
-		diskPathA:      {Status: 500, Body: `{"message":"demo failure"}`},
-		diskPathB:      {File: "testdata/disk_util.json"},
-	}, &logs)
-	res, err := poll(t, p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out := logs.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, "supabase disk call failed") || !strings.Contains(out, "project_ref="+refA) {
-		t.Errorf("no warning naming %s: %s", refA, out)
-	}
-	v := values(t, res)
-	for i := 3; i < 6; i++ {
-		if _, ok := v[MetricNames[i]][refA]; ok {
-			t.Errorf("%s has a series for the failing project", MetricNames[i])
-		}
-	}
-	wantDisk(t, v, refB, 8589934592, 7516192768, 1073741824)
-	if res.ItemErrors != 1 {
-		t.Errorf("ItemErrors = %d, want 1", res.ItemErrors)
+	for name, route := range map[string]testkit.Route{
+		"server error": {Status: 500, Body: `{"message":"demo failure"}`},
+		"null body":    {Body: `null`},
+		"no metrics":   {Body: `{"timestamp":"2026-01-01T00:00:00Z"}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var logs bytes.Buffer
+			p, _ := newDiskPoller(t, map[string]testkit.Route{
+				"/v1/projects": {Body: twoActiveProjects},
+				diskPathA:      route,
+				diskPathB:      {File: "testdata/disk_util.json"},
+			}, &logs)
+			res, err := poll(t, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out := logs.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, "supabase disk call failed") || !strings.Contains(out, "project_ref="+refA) {
+				t.Errorf("no warning naming %s: %s", refA, out)
+			}
+			v := values(t, res)
+			for i := 3; i < 6; i++ {
+				if _, ok := v[MetricNames[i]][refA]; ok {
+					t.Errorf("%s has a series for the failing project", MetricNames[i])
+				}
+			}
+			wantDisk(t, v, refB, 8589934592, 7516192768, 1073741824)
+			if res.ItemErrors != 1 {
+				t.Errorf("ItemErrors = %d, want 1", res.ItemErrors)
+			}
+		})
 	}
 }
 

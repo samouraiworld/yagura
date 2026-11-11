@@ -2,6 +2,7 @@ package supabase
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -55,13 +56,14 @@ type diskUtil struct {
 // series only and the item is reported as skipped.
 func (p *diskPoller) disk(ctx context.Context, pr project) ([]prometheus.Metric, error) {
 	var d diskUtil
-	if _, err := p.client.GetJSON(ctx, projectsPath+"/"+pr.Ref+diskPathSuffix, nil, &d); err != nil {
+	_, err := p.client.GetJSON(ctx, projectsPath+"/"+pr.Ref+diskPathSuffix, nil, &d)
+	if err == nil && d.Metrics == nil {
+		err = errors.New("response has no metrics object")
+	}
+	if err != nil {
 		err = fmt.Errorf("supabase disk of %s: %w", pr.Ref, err)
 		logItemError(ctx, p.logger, "disk", pr.Ref, err)
 		return nil, err
-	}
-	if d.Metrics == nil {
-		return nil, fmt.Errorf("supabase disk of %s: response has no metrics object", pr.Ref)
 	}
 	var out []prometheus.Metric
 	var missing []string
