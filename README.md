@@ -215,12 +215,15 @@ It is the value the billing API reports, which can lag behind real usage;
 `yagura_scaleway_consumption_updated_timestamp_seconds` shows when Scaleway
 last updated it. A row without an amount or currency is skipped, logged and
 counted in `yagura_collector_last_item_errors`. A row without a project name
-keeps an empty `project_name` label, so the total is never undercounted.
+keeps an empty `project_name` label, so the total is never undercounted. The
+current API reference lists no project name on consumption rows, so expect
+`project_name` to be empty; the dashboard then shows project IDs.
 
 **VAT, not confirmed:** the Scaleway console shows consumption excluding
-taxes, and the API field naming suggests the same, but we have not confirmed
-whether the amount the API returns includes VAT. Compare it with an invoice
-before you set a budget on it.
+taxes, and the billing API serves taxes from a separate endpoint, which
+suggests the same, but we have not confirmed whether the amount the API
+returns includes VAT. Compare it with an invoice before you set a budget on
+it.
 
 **Key setup.** In the Scaleway console, under IAM:
 
