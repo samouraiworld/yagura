@@ -42,9 +42,10 @@ func buildPollers(cfg *config.Config, d deps) ([]poller.Poller, error) {
 			Burst:     5,
 			Requests:  d.requests,
 		})
+		logger := d.logger.With("provider", "gandi")
 		pollers = append(pollers,
-			gandi.NewDomainsPoller(client, g.SharingID, g.DomainsInterval, d.logger),
-			gandi.NewBillingPoller(client, g.SharingID, g.BillingInterval, d.logger),
+			gandi.NewDomainsPoller(client, g.SharingID, g.DomainsInterval, logger),
+			gandi.NewBillingPoller(client, g.SharingID, g.BillingInterval, logger),
 		)
 	}
 	return pollers, nil
