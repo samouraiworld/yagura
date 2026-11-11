@@ -70,8 +70,8 @@ Go runtime and process metrics are also exposed.
 | `yagura_statuspage_updated_timestamp_seconds` | gauge | `provider` | Unix time of the page's `updated_at` |
 | `yagura_gandi_domain_expiry_timestamp_seconds` | gauge | `domain` | Unix time at which the domain registration ends |
 | `yagura_gandi_domain_autorenew` | gauge | `domain` | 1 if the domain renews automatically, else 0 |
-| `yagura_gandi_prepaid_balance` | gauge | `currency` | Prepaid account balance (omitted if the account has no prepaid) |
-| `yagura_gandi_prepaid_warning_threshold` | gauge | `currency` | Balance below which Gandi sends a warning (omitted if the account has no prepaid) |
+| `yagura_gandi_prepaid_balance` | gauge | `currency` | Prepaid account balance (omitted if the account has no prepaid; omitted with an item error if missing) |
+| `yagura_gandi_prepaid_warning_threshold` | gauge | `currency` | Balance below which Gandi sends a warning (omitted if the account has no prepaid or no threshold set; omitted with an item error if it is not a number) |
 | `yagura_scaleway_consumption_amount` | gauge | `project_id`, `project_name`, `category`, `currency` | Consumption month to date, as reported by the Scaleway billing API; resets on the 1st |
 | `yagura_scaleway_consumption_updated_timestamp_seconds` | gauge | none | Unix time of the billing API's last consumption update (omitted if the API does not send a valid one) |
 | `yagura_api_requests_total` | counter | `provider`, `code` | Outbound requests (HTTP status, `invalid` for a status outside 100-599, or `error` for network failures) |
@@ -147,7 +147,10 @@ Gandi API v5 (`https://api.gandi.net`). It is enabled when `YAGURA_GANDI_TOKEN`
   whether it renews automatically.
 - `gandi_billing` reads the billing information and exports the prepaid balance
   and its warning threshold. An account without prepaid exports no prepaid
-  series and the poll still succeeds.
+  series and the poll still succeeds. A prepaid account without a warning
+  threshold exports the balance only, also without error; the
+  `YaguraGandiPrepaidBalanceLow` alert compares the two series, so it cannot
+  fire until a threshold is set in Gandi.
 
 | Variable | Default | Purpose |
 |---|---|---|

@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Statuspage: the `maintenance` indicator is now a known state, exported as `-2`, with no warning and no item error, so `YaguraCollectorPartialFailure` no longer fires during a provider's maintenance. The dashboard maps `-2` to "maintenance".
+- Gandi billing: a prepaid account without a warning threshold no longer counts an item error on every poll; the balance is exported and the threshold series omitted. A threshold that is present but not a number now counts an item error instead of failing the whole poll.
+- Dashboard: the README now explains that the `datasource` variable lists Prometheus-type data sources only, and how VictoriaMetrics users connect it through a Prometheus-type data source.
+- Configuration: an inline secret or a `_FILE` path made only of whitespace (any Unicode space) is now a startup error naming the variable, instead of enabling a collector that fails every poll. A secret file holding only Unicode spaces now counts as empty. This applies to every secret variable (`YAGURA_GANDI_TOKEN`, `YAGURA_SCALEWAY_SECRET_KEY`).
 
 ## [0.2.0] - 2026-11-11
 

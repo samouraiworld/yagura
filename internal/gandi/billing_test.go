@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,9 +87,18 @@ func TestBillingPartialPrepaid(t *testing.T) {
 		{"empty currency", `{"prepaid":{"amount":1,"currency":"","warning_threshold":2}}`, nil, 1},
 		{"no amount", `{"prepaid":{"currency":"EUR","warning_threshold":2}}`,
 			map[string]float64{"yagura_gandi_prepaid_warning_threshold": 2}, 1},
+		{"no threshold", `{"prepaid":{"amount":0,"currency":"EUR"}}`,
+			map[string]float64{"yagura_gandi_prepaid_balance": 0}, 0},
 		{"null threshold", `{"prepaid":{"amount":1,"currency":"EUR","warning_threshold":null}}`,
+			map[string]float64{"yagura_gandi_prepaid_balance": 1}, 0},
+		{"string threshold", `{"prepaid":{"amount":1,"currency":"EUR","warning_threshold":"100"}}`,
 			map[string]float64{"yagura_gandi_prepaid_balance": 1}, 1},
-		{"neither number", `{"prepaid":{"currency":"EUR"}}`, nil, 2},
+		{"object threshold", `{"prepaid":{"amount":1,"currency":"EUR","warning_threshold":{}}}`,
+			map[string]float64{"yagura_gandi_prepaid_balance": 1}, 1},
+		{"null amount", `{"prepaid":{"amount":null,"currency":"EUR","warning_threshold":2}}`,
+			map[string]float64{"yagura_gandi_prepaid_warning_threshold": 2}, 1},
+		{"no amount nor threshold", `{"prepaid":{"currency":"EUR"}}`, nil, 1},
+		{"no amount, string threshold", `{"prepaid":{"currency":"EUR","warning_threshold":"x"}}`, nil, 2},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -112,6 +122,58 @@ func TestBillingPartialPrepaid(t *testing.T) {
 	}
 }
 
+// An account without a warning threshold is a valid setting: the balance is
+// exported, the threshold series is omitted, and nothing is logged as a fault.
+func TestBillingPrepaidWithoutThresholdIsQuiet(t *testing.T) {
+	for name, body := range map[string]string{
+		"absent": `{"prepaid":{"amount":0,"currency":"EUR"}}`,
+		"null":   `{"prepaid":{"amount":0,"currency":"EUR","warning_threshold":null}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var logs bytes.Buffer
+			p := newBilling(t, "", map[string]testkit.Route{billingPath: {Body: body}}, &logs)
+			res, err := poll(t, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.ItemErrors != 0 {
+				t.Errorf("ItemErrors = %d, want 0", res.ItemErrors)
+			}
+			if strings.Contains(logs.String(), "level=WARN") {
+				t.Errorf("threshold not set must not warn:\n%s", logs.String())
+			}
+		})
+	}
+}
+
+// A threshold that is not a usable number is logged by field name only: the
+// remote value never reaches the logs.
+func TestBillingInvalidThresholdValueNotLogged(t *testing.T) {
+	for name, raw := range map[string]string{
+		"string":   `"demo-value-4242"`,
+		"overflow": `1e400`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var logs bytes.Buffer
+			body := `{"prepaid":{"amount":1,"currency":"EUR","warning_threshold":` + raw + `}}`
+			p := newBilling(t, "", map[string]testkit.Route{billingPath: {Body: body}}, &logs)
+			res, err := poll(t, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.ItemErrors != 1 {
+				t.Errorf("ItemErrors = %d, want 1", res.ItemErrors)
+			}
+			if !strings.Contains(logs.String(), "warning_threshold") {
+				t.Errorf("invalid threshold not logged by field name:\n%s", logs.String())
+			}
+			if strings.Contains(logs.String(), "4242") || strings.Contains(logs.String(), "1e400") {
+				t.Errorf("log leaks the remote value:\n%s", logs.String())
+			}
+		})
+	}
+}
+
 func TestBillingFailures(t *testing.T) {
 	cases := map[string]testkit.Route{
 		"http error":  {Status: 500, Body: `{"message":"boom"}`},
@@ -121,6 +183,9 @@ func TestBillingFailures(t *testing.T) {
 		"array":       {Body: `[]`},
 		"string body": {Body: `"x"`},
 		"empty body":  {Body: " "},
+		// The balance is required: a wrong type fails the poll so that the
+		// last good balance stays exported instead of vanishing.
+		"string amount": {Body: `{"prepaid":{"amount":"42.5","currency":"EUR","warning_threshold":100}}`},
 	}
 	for name, route := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -1,7 +1,9 @@
 package gandi
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -33,14 +35,20 @@ func (p *billingPoller) Interval() time.Duration { return p.interval }
 
 type billingInfo struct {
 	Prepaid *struct {
-		Amount           *float64 `json:"amount"`
-		Currency         string   `json:"currency"`
-		WarningThreshold *float64 `json:"warning_threshold"`
+		Amount   *float64 `json:"amount"`
+		Currency string   `json:"currency"`
+		// WarningThreshold stays raw: an absent or null threshold is a valid
+		// account setting, while a present non-number is an item error that
+		// must not fail the whole poll. A non-number amount still fails the
+		// poll, so the last good balance stays exported.
+		WarningThreshold json.RawMessage `json:"warning_threshold"`
 	} `json:"prepaid"`
 }
 
 // Poll reads the billing info and exports the prepaid balance and warning
-// threshold. An account without prepaid yields no series and no error.
+// threshold. An account without prepaid yields no series and no error; a
+// prepaid account without a threshold yields the balance only, also without
+// error.
 func (p *billingPoller) Poll(ctx context.Context) (poller.Result, error) {
 	path := billingPath
 	if p.sharingID != "" {
@@ -64,21 +72,31 @@ func (p *billingPoller) Poll(ctx context.Context) (poller.Result, error) {
 
 	var metrics []prometheus.Metric
 	var itemErrors int
-	for _, f := range []struct {
-		desc  *prometheus.Desc
-		field string
-		value *float64
-	}{
-		{prepaidBalanceDesc, "amount", pp.Amount},
-		{prepaidThresholdDesc, "warning_threshold", pp.WarningThreshold},
-	} {
-		if f.value == nil {
-			p.logger.Warn("gandi prepaid field missing; series omitted",
-				"field", f.field, "currency", capped(pp.Currency))
-			itemErrors++
-			continue
-		}
-		metrics = append(metrics, gauge(f.desc, *f.value, pp.Currency))
+	if pp.Amount == nil {
+		p.logger.Warn("gandi prepaid field missing; series omitted",
+			"field", "amount", "currency", capped(pp.Currency))
+		itemErrors++
+	} else {
+		metrics = append(metrics, gauge(prepaidBalanceDesc, *pp.Amount, pp.Currency))
+	}
+	if threshold, ok, err := optionalNumber(pp.WarningThreshold); err != nil {
+		p.logger.Warn("gandi prepaid field is not a number; series omitted",
+			"field", "warning_threshold", "currency", capped(pp.Currency))
+		itemErrors++
+	} else if ok {
+		metrics = append(metrics, gauge(prepaidThresholdDesc, threshold, pp.Currency))
 	}
 	return poller.Result{Metrics: metrics, ItemErrors: itemErrors}, nil
+}
+
+// optionalNumber decodes an optional JSON number. An absent or null value
+// gives ok=false without error; any other non-number is an error.
+func optionalNumber(raw json.RawMessage) (v float64, ok bool, err error) {
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return 0, false, nil
+	}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return 0, false, err
+	}
+	return v, true, nil
 }
