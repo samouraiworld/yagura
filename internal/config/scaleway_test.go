@@ -102,6 +102,14 @@ func TestScalewayValidation(t *testing.T) {
 			"YAGURA_SCALEWAY_SECRET_KEY_FILE": "/f",
 			"YAGURA_SCALEWAY_ORGANIZATION_ID": testOrganizationID,
 		}, "YAGURA_SCALEWAY_SECRET_KEY_FILE"},
+		{"whitespace-only key", map[string]string{
+			"YAGURA_SCALEWAY_SECRET_KEY":      " \t\r\n",
+			"YAGURA_SCALEWAY_ORGANIZATION_ID": testOrganizationID,
+		}, "YAGURA_SCALEWAY_SECRET_KEY: secret is empty"},
+		{"blank key file path", map[string]string{
+			"YAGURA_SCALEWAY_SECRET_KEY_FILE": " \n",
+			"YAGURA_SCALEWAY_ORGANIZATION_ID": testOrganizationID,
+		}, "YAGURA_SCALEWAY_SECRET_KEY_FILE: path is empty"},
 		{"interval too short", map[string]string{
 			"YAGURA_SCALEWAY_SECRET_KEY":      "s3cretpw",
 			"YAGURA_SCALEWAY_ORGANIZATION_ID": testOrganizationID,

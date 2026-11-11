@@ -48,8 +48,10 @@ when its credential variable (or its `_FILE` variant) is set.
 
 Every secret variable `X` also accepts `X_FILE`, naming a file whose trimmed
 content is the secret (Docker and Kubernetes secrets). Setting both is a
-startup error. A `_FILE` secret is re-read before each poll, so a rotated
-token is picked up without a restart. Intervals use Go duration syntax with a
+startup error, and so is an inline value or a `_FILE` path made only of
+whitespace. A `_FILE` secret is re-read before each poll, so a rotated token is
+picked up without a restart; a file that is empty after trimming fails that
+poll. Intervals use Go duration syntax with a
 minimum of 30s. Provider variables are listed in each provider section below.
 
 ## Metric reference
