@@ -1,0 +1,4 @@
+[
+  {"ref":"aaaaaaaaaaaaaaaaaaaa","name":"demo-app","organization_slug":"demo-org","region":"eu-west-1","status":"ACTIVE_HEALTHY"},
+  {"ref":"bbbbbbbbbbbbbbbbbbbb","name":"demo-paused","organization_slug":"demo-org","region":"us-east-1","status":"INACTIVE"}
+]
