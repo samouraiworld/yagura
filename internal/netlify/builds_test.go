@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"log/slog"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,8 +14,8 @@ import (
 )
 
 const (
-	acct1 = "00000000-0000-0000-0000-0000000000a1"
-	acct2 = "00000000-0000-0000-0000-0000000000a2"
+	acct1 = "00000000-0000-0000-0000-000000000003"
+	acct2 = "00000000-0000-0000-0000-000000000004"
 
 	accountsKey = "GET /api/v1/accounts"
 	buildsKey1  = "GET /api/v1/" + acct1 + "/builds/status"
@@ -148,6 +149,16 @@ func TestBuildStatusItemCases(t *testing.T) {
 			if err != nil {
 				t.Fatalf("poll: %v", err)
 			}
+			if tc.name == "null body" {
+				for _, want := range []string{"level=WARN", "account_id=" + acct1, "response is not an array"} {
+					if !strings.Contains(logs.String(), want) {
+						t.Errorf("logs lack %q: %s", want, logs.String())
+					}
+				}
+			}
+			if tc.name == "not found" && strings.Contains(logs.String(), "level=WARN") {
+				t.Errorf("404 must not warn: %s", logs.String())
+			}
 			if res.ItemErrors != tc.wantErrors {
 				t.Errorf("ItemErrors = %d, want %d", res.ItemErrors, tc.wantErrors)
 			}
@@ -169,10 +180,10 @@ func TestAccountsSkippedAndDeduped(t *testing.T) {
 	routes := map[string]testkit.Route{
 		accountsKey: {Body: `[
 			{"id":"` + acct1 + `","slug":"demo-team"},
-			{"id":"../x","slug":"bad"},
+			{"id":"demo/bad","slug":"demo-bad"},
 			{"id":"` + acct2 + `","slug":""},
 			{"id":"` + acct1 + `","slug":"demo-team"},
-			{"id":"00000000-0000-0000-0000-0000000000a3","slug":"demo-team"}]`},
+			{"id":"00000000-0000-0000-0000-000000000007","slug":"demo-team"}]`},
 		buildsKey1: {File: "testdata/builds_status.json"},
 	}
 	var logs bytes.Buffer
@@ -205,7 +216,7 @@ func TestAccountsNotAnArrayFailsPoll(t *testing.T) {
 func TestBuildsAuthErrorFailsPoll(t *testing.T) {
 	var logs bytes.Buffer
 	p, _ := newBuildsPoller(t, oneAccount(testkit.Route{Status: 401, Body: `{}`}), &logs)
-	if _, err := poll(t, p); err == nil {
-		t.Fatal("want error on 401")
+	if _, err := poll(t, p); err == nil || !httpx.IsAuthError(err) {
+		t.Fatalf("err = %v, want auth error", err)
 	}
 }

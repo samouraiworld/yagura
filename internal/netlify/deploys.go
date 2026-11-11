@@ -53,7 +53,7 @@ func validID(id string) bool {
 // (a link whose rel parameter contains "next"). The URL itself is never used.
 func hasNextLink(h http.Header) bool {
 	for _, v := range h.Values("Link") {
-		for _, link := range strings.Split(v, ",") {
+		for _, link := range splitLinks(v) {
 			_, params, ok := strings.Cut(link, ">")
 			if !ok {
 				continue
@@ -72,6 +72,21 @@ func hasNextLink(h http.Header) bool {
 		}
 	}
 	return false
+}
+
+// splitLinks splits a Link header value into its links, cutting only at a
+// comma that is followed by optional spaces and "<" so commas inside URLs or
+// quoted parameters do not split a link.
+func splitLinks(v string) []string {
+	var out []string
+	start := 0
+	for i := 0; i < len(v); i++ {
+		if v[i] == ',' && strings.HasPrefix(strings.TrimLeft(v[i+1:], " \t"), "<") {
+			out = append(out, v[start:i])
+			start = i + 1
+		}
+	}
+	return append(out, v[start:])
 }
 
 // listSites returns the sites of every page, requesting page=N itself and
@@ -143,13 +158,14 @@ func listSites(ctx context.Context, c *httpx.Client, logger *slog.Logger) ([]sit
 // logItemError logs the failure of one per-item call: a gone item at debug
 // level, other failures as warnings. Auth errors, skipped items (which log
 // their own warning) and errors after cancellation are not logged.
-func logItemError(ctx context.Context, logger *slog.Logger, what string, id string, err error) {
+// key is the log attribute name carrying id (site_id or account_id).
+func logItemError(ctx context.Context, logger *slog.Logger, what, key, id string, err error) {
 	switch {
 	case httpx.IsNotFound(err):
-		logger.Debug("netlify "+what+" not found; omitted", "id", id)
+		logger.Debug("netlify "+what+" not found; omitted", key, id)
 	case httpx.IsAuthError(err), errors.Is(err, poller.ErrItemSkipped), ctx.Err() != nil:
 	default:
-		logger.Warn("netlify "+what+" call failed", "id", id, "error", capped(err.Error()))
+		logger.Warn("netlify "+what+" call failed", key, id, "error", cappedError(err))
 	}
 }
 
@@ -196,7 +212,7 @@ func (p *deploysPoller) deploy(ctx context.Context, s site) ([]prometheus.Metric
 	}
 	if err != nil {
 		err = fmt.Errorf("netlify deploys of %s: %w", s.ID, err)
-		logItemError(ctx, p.logger, "deploys", s.ID, err)
+		logItemError(ctx, p.logger, "deploys", "site_id", s.ID, err)
 		return nil, err
 	}
 	if len(deploys) == 0 {
@@ -225,6 +241,20 @@ func (p *deploysPoller) deploy(ctx context.Context, s site) ([]prometheus.Metric
 
 // maxLogValue caps remote strings written to the logs.
 const maxLogValue = 64
+
+// maxLogError caps error text written to the logs. It is larger than
+// maxLogValue so the cause survives: httpx errors carry only the method, path
+// and status (never query or headers) and the ids in the path are validated.
+const maxLogError = 256
+
+// cappedError returns at most maxLogError bytes of err's text, marking a cut.
+func cappedError(err error) string {
+	s := err.Error()
+	if len(s) <= maxLogError {
+		return s
+	}
+	return s[:maxLogError] + "...(truncated)"
+}
 
 // capped returns at most maxLogValue bytes of s, marking a cut.
 func capped(s string) string {

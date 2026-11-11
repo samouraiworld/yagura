@@ -192,9 +192,9 @@ func TestSitesSkippedAndDeduped(t *testing.T) {
 	routes := map[string]testkit.Route{
 		sitesKey1: {Body: `[
 			{"id":"` + id1 + `","name":"demo-site","account_slug":"demo-team"},
-			{"id":"../x","name":"bad-id","account_slug":"demo-team"},
-			{"id":"","name":"no-id"},
-			{"id":"abc","name":""},
+			{"id":"demo/bad","name":"demo-bad-id","account_slug":"demo-team"},
+			{"id":"","name":"demo-no-id"},
+			{"id":"demo-abc","name":""},
 			{"id":"` + id2 + `","name":"demo-site","account_slug":"demo-team"},
 			{"id":"` + id1 + `","name":"demo-site","account_slug":""}
 		]`},
@@ -291,6 +291,9 @@ func TestHasNextLink(t *testing.T) {
 		{"several values", []string{`<a>; rel="first"`, `<b>; rel="next"`}, true},
 		{"multi rel", []string{`<a>; rel="prev next"`}, true},
 		{"last only", []string{`<a>; rel="last"`}, false},
+		{"comma in quoted param", []string{`<a>; title="x, y"; rel="next"`}, true},
+		{"comma in url", []string{`<https://x.invalid/?q=1,2>; rel="next"`}, true},
+		{"comma in url prev", []string{`<https://x.invalid/?q=1,2>; rel="prev"`}, false},
 		{"garbage", []string{`next`}, false},
 	}
 	for _, tc := range tests {
@@ -303,5 +306,45 @@ func TestHasNextLink(t *testing.T) {
 				t.Errorf("hasNextLink = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestDeploysNullBodyKeepsOtherSites(t *testing.T) {
+	routes := twoSites()
+	routes[sitesKey1] = testkit.Route{File: "testdata/sites_page1.json", Header: nextLink}
+	routes[deploysKey1] = testkit.Route{Body: `null`}
+	var logs bytes.Buffer
+	p, _ := newPoller(t, routes, &logs)
+	res, err := poll(t, p)
+	if err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	if res.ItemErrors != 1 {
+		t.Errorf("ItemErrors = %d, want 1", res.ItemErrors)
+	}
+	if got := values(t, res)["yagura_netlify_last_deploy_failed"]; len(got) != 1 || got["demo-docs"] != 1 {
+		t.Errorf("failed series = %v, want only demo-docs", got)
+	}
+	out := logs.String()
+	for _, want := range []string{"level=WARN", "site_id=" + id1, "response is not an array"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("logs lack %q: %s", want, out)
+		}
+	}
+}
+
+func TestDeploysItemFailureLogsCause(t *testing.T) {
+	routes := map[string]testkit.Route{
+		sitesKey1:   {File: "testdata/sites_page1.json"},
+		deploysKey1: {Status: 404, Body: `{}`},
+	}
+	var logs bytes.Buffer
+	p, _ := newPoller(t, routes, &logs)
+	if _, err := poll(t, p); err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	out := logs.String()
+	if strings.Contains(out, "level=WARN") || !strings.Contains(out, "level=DEBUG") || !strings.Contains(out, "site_id="+id1) {
+		t.Errorf("404 must log at debug only: %s", out)
 	}
 }

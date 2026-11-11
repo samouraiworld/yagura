@@ -122,7 +122,7 @@ func (p *buildsPoller) status(ctx context.Context, a account) ([]prometheus.Metr
 	}
 	if err != nil {
 		err = fmt.Errorf("netlify build status of %s: %w", a.ID, err)
-		logItemError(ctx, p.logger, "build status", a.ID, err)
+		logItemError(ctx, p.logger, "build status", "account_id", a.ID, err)
 		return nil, err
 	}
 	if len(statuses) == 0 {
