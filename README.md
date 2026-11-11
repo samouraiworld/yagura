@@ -353,7 +353,13 @@ default intervals. Beyond that, raise the poll intervals.
 ## Dashboard and alerts
 
 - `dashboards/yagura-overview.json`: classic Grafana dashboard JSON. Import it
-  and pick your Prometheus data source in the `datasource` variable.
+  and pick your Prometheus data source in the `datasource` variable. A Grafana
+  data source variable lists one plugin type only, here `prometheus`, so a data
+  source of the VictoriaMetrics plugin type does not appear in it. With
+  VictoriaMetrics, add a data source of type Prometheus whose URL points at
+  VictoriaMetrics (single-node, or vmselect with its `/select/<tenant>/prometheus`
+  path): VictoriaMetrics serves the Prometheus query API, and the dashboard
+  uses only PromQL.
 - `alerts/yagura.rules.yml`: example rules for Prometheus and vmalert. The
   `YaguraExporterDown` rule assumes the scrape job is named `yagura`. Check
   the rules with `make rules` (needs Docker).
