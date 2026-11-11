@@ -88,3 +88,41 @@ func TestGandiValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestGandiSharingIDMustBeUUID(t *testing.T) {
+	for _, id := range []string{
+		"s3cretpw",
+		"00000000-0000-0000-0000-00000000000",
+		"00000000-0000-0000-0000-000000000001/s3cretpw",
+		"../s3cretpw",
+		"00000000-0000-0000-0000-000000000001?s3cretpw",
+		"0000000g-0000-0000-0000-000000000001",
+		"000000000000000000000000000000000001",
+	} {
+		t.Run(id, func(t *testing.T) {
+			_, err := Load(mapLookup(map[string]string{
+				"YAGURA_GANDI_TOKEN":      "test-token",
+				"YAGURA_GANDI_SHARING_ID": id,
+			}))
+			if err == nil || !strings.Contains(err.Error(), "YAGURA_GANDI_SHARING_ID") {
+				t.Fatalf("want error naming YAGURA_GANDI_SHARING_ID, got %v", err)
+			}
+			if strings.Contains(err.Error(), "s3cretpw") || strings.Contains(err.Error(), id) {
+				t.Fatalf("error echoes the value: %v", err)
+			}
+		})
+	}
+}
+
+func TestGandiSharingIDTrimmed(t *testing.T) {
+	c, err := Load(mapLookup(map[string]string{
+		"YAGURA_GANDI_TOKEN":      "test-token",
+		"YAGURA_GANDI_SHARING_ID": " 0000000A-0000-0000-0000-00000000000b ",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Gandi.SharingID != "0000000A-0000-0000-0000-00000000000b" {
+		t.Fatalf("got %q", c.Gandi.SharingID)
+	}
+}

@@ -148,7 +148,7 @@ Gandi API v5 (`https://api.gandi.net`). It is enabled when `YAGURA_GANDI_TOKEN`
 | Variable | Default | Purpose |
 |---|---|---|
 | `YAGURA_GANDI_TOKEN` (or `_FILE`) | empty | Personal access token; enables the collector |
-| `YAGURA_GANDI_SHARING_ID` | empty | Organization ID: restricts the domain list to it and reads its billing account |
+| `YAGURA_GANDI_SHARING_ID` | empty | Organization ID (UUID): restricts the domain list to it and reads its billing account |
 | `YAGURA_GANDI_DOMAINS_INTERVAL` | `6h` | Domains poll interval (minimum 30s) |
 | `YAGURA_GANDI_BILLING_INTERVAL` | `1h` | Billing poll interval (minimum 30s) |
 

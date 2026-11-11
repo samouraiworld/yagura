@@ -1,6 +1,16 @@
 package config
 
-import "time"
+import (
+	"errors"
+	"regexp"
+	"strings"
+	"time"
+)
+
+// uuidPattern matches the 8-4-4-4-12 hexadecimal form of a Gandi
+// organization ID. The billing poller appends the ID to a URL path, so
+// nothing else may pass.
+var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // GandiConfig holds the Gandi collector settings.
 type GandiConfig struct {
@@ -22,7 +32,14 @@ func loadGandi(lookup LookupFunc) (*GandiConfig, error) {
 		return nil, nil
 	}
 	g := &GandiConfig{Token: token}
-	g.SharingID, _ = get(lookup, "YAGURA_GANDI_SHARING_ID")
+	if id, ok := get(lookup, "YAGURA_GANDI_SHARING_ID"); ok {
+		// The value is not echoed: a token pasted into the wrong variable
+		// must not reach the logs.
+		if id = strings.TrimSpace(id); !uuidPattern.MatchString(id) {
+			return nil, errors.New("YAGURA_GANDI_SHARING_ID: must be an organization ID in UUID form")
+		}
+		g.SharingID = id
+	}
 	if g.DomainsInterval, err = duration(lookup, "YAGURA_GANDI_DOMAINS_INTERVAL", 6*time.Hour); err != nil {
 		return nil, err
 	}
