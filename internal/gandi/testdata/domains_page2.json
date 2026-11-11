@@ -1,0 +1,15 @@
+[
+  {
+    "fqdn": "example.net",
+    "id": "00000000-0000-0000-0000-000000000002",
+    "autorenew": false,
+    "dates": {"registry_ends_at": "2027-02-13T10:04:18Z"},
+    "unknown": "ignored"
+  },
+  {
+    "fqdn": "www.example.org",
+    "id": "00000000-0000-0000-0000-000000000003",
+    "autorenew": true,
+    "dates": {"registry_ends_at": "2028-01-01T00:00:00Z"}
+  }
+]
