@@ -61,10 +61,13 @@ groups:
 
       - alert: YaguraMonthlyCostOverBudget
         # 100 is an example monthly budget: edit it to yours. The amount is
-        # month to date and resets on the 1st, so the alert resolves then.
+        # month to date and resets on the 1st, so the alert resolves after
+        # the first successful poll of the month (while polls fail, yagura
+        # keeps the last value and YaguraCollectorFailing fires). Each
+        # exporter instance, i.e. each organization, is compared on its own.
         # One threshold applies to every currency; add a currency matcher
         # (for example {currency="EUR"}) if the account bills in several.
-        expr: sum by (currency) (yagura_scaleway_consumption_amount) > 100
+        expr: sum without (project_id, project_name, category) (yagura_scaleway_consumption_amount) > 100
         for: 1h
         labels:
           severity: warning

@@ -34,7 +34,7 @@ func loadScaleway(lookup LookupFunc) (*ScalewayConfig, error) {
 	if !uuidPattern.MatchString(id) {
 		return nil, errors.New("YAGURA_SCALEWAY_ORGANIZATION_ID: must be an organization ID in UUID form")
 	}
-	s.OrganizationID = id
+	s.OrganizationID = strings.ToLower(id)
 	if s.Interval, err = duration(lookup, "YAGURA_SCALEWAY_INTERVAL", time.Hour); err != nil {
 		return nil, err
 	}

@@ -73,7 +73,7 @@ Go runtime and process metrics are also exposed.
 | `yagura_gandi_prepaid_balance` | gauge | `currency` | Prepaid account balance (omitted if the account has no prepaid) |
 | `yagura_gandi_prepaid_warning_threshold` | gauge | `currency` | Balance below which Gandi sends a warning (omitted if the account has no prepaid) |
 | `yagura_scaleway_consumption_amount` | gauge | `project_id`, `project_name`, `category`, `currency` | Consumption month to date, as reported by the Scaleway billing API; resets on the 1st |
-| `yagura_scaleway_consumption_updated_timestamp_seconds` | gauge | none | Unix time of the billing API's last consumption update (omitted if the API does not send it) |
+| `yagura_scaleway_consumption_updated_timestamp_seconds` | gauge | none | Unix time of the billing API's last consumption update (omitted if the API does not send a valid one) |
 | `yagura_api_requests_total` | counter | `provider`, `code` | Outbound requests (HTTP status, `invalid` for a status outside 100-599, or `error` for network failures) |
 | `yagura_build_info` | gauge | `version`, `revision`, `goversion` | Build metadata, always 1 |
 
@@ -207,8 +207,10 @@ products, resources and SKUs never become labels.
 | `YAGURA_SCALEWAY_INTERVAL` | `1h` | Poll interval (minimum 30s) |
 
 Metrics are listed in the [metric reference](#metric-reference). The amount
-is month to date and resets on the 1st: it grows during the month, then the
-series drops back. A project with no consumption yet this month has no series.
+is month to date and resets on the 1st, at the first successful poll of the
+month. It usually grows during the month, but a credit or correction from
+Scaleway can lower it, even below zero. A project with no consumption yet this
+month has no series.
 It is the value the billing API reports, which can lag behind real usage;
 `yagura_scaleway_consumption_updated_timestamp_seconds` shows when Scaleway
 last updated it. A row without an amount or currency is skipped, logged and
@@ -231,7 +233,9 @@ before you set a budget on it.
 - generate an API key for the application, with an expiry date; the
   `YaguraCollectorFailing` alert tells you when it has expired;
 - set `YAGURA_SCALEWAY_SECRET_KEY` to the key's *secret* key (not its access
-  key) and `YAGURA_SCALEWAY_ORGANIZATION_ID` to the organization ID.
+  key) and `YAGURA_SCALEWAY_ORGANIZATION_ID` to the organization ID shown in
+  the console's organization settings. Both are UUIDs: do not swap them, or
+  the secret key is sent to Scaleway as a query parameter.
 
 Not confirmed either: whether `BillingReadOnly` alone is enough to filter by
 organization. If the poller fails and `yagura_api_requests_total` shows code
@@ -242,8 +246,10 @@ IDs and what each one has cost this month. Turn on the web config (TLS, basic
 auth) or keep the port reachable only by your Prometheus server.
 
 The `YaguraMonthlyCostOverBudget` alert fires when the month-to-date total of
-a currency stays above 100 for an hour. 100 is an example: edit it in
-`alerts/yagura.rules.yml` to your budget.
+a currency, for one yagura instance, stays above 100 for an hour. 100 is an
+example: edit it in `alerts/yagura.rules.yml` to your budget. While polls
+fail, yagura keeps serving the last amount it read, so after the 1st the alert
+resolves only once a poll succeeds; `YaguraCollectorFailing` covers that case.
 
 #### Bucket size and object count (Cockpit)
 
@@ -251,13 +257,16 @@ yagura does not read Object Storage bucket metrics: Scaleway already publishes
 them in Cockpit, its managed metrics service, as
 `object_storage_bucket_usage_bytes_total` (bytes stored) and
 `object_storage_bucket_objects_total` (object count), refreshed hourly. Both
-ways below need a Cockpit token with the *Query* permission, created in the
-same region as the metrics data source, and the data source URL shown in the
+ways below need a Cockpit token that can only query metrics (no push, logs,
+traces or alerting permissions), created in the same region as the metrics
+data source, and the data source URL shown in the
 Cockpit console, `https://<data-source-id>.metrics.cockpit.<region>.scw.cloud`.
 
 **Grafana data source** (the data stays in Cockpit): add a Prometheus data
 source whose URL is the data source URL followed by `/prometheus`, with a
-custom HTTP header `X-Token` set to the token. As a provisioning file:
+custom HTTP header `X-Token` set to the token. As a provisioning file, where
+Grafana reads `SCW_COCKPIT_TOKEN` from its environment so the token stays out
+of the file:
 
 ```yaml
 apiVersion: 1
@@ -269,7 +278,7 @@ datasources:
     jsonData:
       httpHeaderName1: X-Token
     secureJsonData:
-      httpHeaderValue1: <cockpit-token>
+      httpHeaderValue1: ${SCW_COCKPIT_TOKEN}
 ```
 
 **Federation** (copies the series into your own Prometheus): scrape the
@@ -283,6 +292,7 @@ scrape_configs:
   - job_name: scaleway-cockpit
     scrape_interval: 3m
     honor_labels: true
+    follow_redirects: false
     scheme: https
     metrics_path: /federate
     params:
@@ -303,23 +313,26 @@ local.file "scw_cockpit_token" {
 }
 
 prometheus.scrape "scaleway_cockpit" {
-  targets         = [{"__address__" = "<data-source-id>.metrics.cockpit.<region>.scw.cloud"}]
-  scheme          = "https"
-  metrics_path    = "/federate"
-  honor_labels    = true
-  scrape_interval = "3m"
-  params          = {"match[]" = ["{__name__=~\"object_storage_bucket_(usage_bytes|objects)_total\"}"]}
-  http_headers    = {"X-Token" = [local.file.scw_cockpit_token.content]}
-  forward_to      = [prometheus.remote_write.default.receiver]
+  targets          = [{"__address__" = "<data-source-id>.metrics.cockpit.<region>.scw.cloud"}]
+  scheme           = "https"
+  metrics_path     = "/federate"
+  honor_labels     = true
+  follow_redirects = false
+  scrape_interval  = "3m"
+  params           = {"match[]" = ["{__name__=~\"object_storage_bucket_(usage_bytes|objects)_total\"}"]}
+  http_headers     = {"X-Token" = [local.file.scw_cockpit_token.content]}
+  forward_to       = [prometheus.remote_write.default.receiver]
 }
 ```
 
-Write the token file without a trailing newline.
+Redirects are turned off so the token is never sent to another host. Write
+the token file without a trailing newline.
 
 For per-resource consumption and an inventory of instances, volumes and other
 resources, use [`promhippie/scw_exporter`](https://github.com/promhippie/scw_exporter).
 Its inventory collectors need read access to those resources, beyond
-`BillingReadOnly`.
+`BillingReadOnly`: give it its own IAM application and key rather than
+widening yagura's policy.
 
 ## Target scale
 

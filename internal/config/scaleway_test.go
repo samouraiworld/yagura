@@ -68,7 +68,9 @@ func TestScalewayOverrides(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := c.Scaleway
-	if s.OrganizationID != "0000000A-0000-0000-0000-00000000000b" || s.Interval != 3*time.Hour {
+	// Trimmed and lowercased: Scaleway shows IDs in lowercase, and the query
+	// filter must not depend on how the ID was typed.
+	if s.OrganizationID != "0000000a-0000-0000-0000-00000000000b" || s.Interval != 3*time.Hour {
 		t.Fatalf("unexpected config: %+v", s)
 	}
 }
