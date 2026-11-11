@@ -160,3 +160,36 @@ tests:
             exp_annotations:
               summary: "Gandi prepaid balance is low (EUR)"
               description: "The Gandi prepaid balance is 10 EUR, below the warning threshold set in the Gandi account."
+
+  - interval: 1m
+    input_series:
+      # demo-1, EUR: two projects and categories sum to 110.25, over the 100
+      # budget: fires after the 1h "for".
+      - series: 'yagura_scaleway_consumption_amount{job="yagura", instance="demo-1.example.com:10100", project_id="00000000-0000-0000-0000-000000000001", project_name="demo-web", category="Compute", currency="EUR"}'
+        values: '60.25x120'
+      - series: 'yagura_scaleway_consumption_amount{job="yagura", instance="demo-1.example.com:10100", project_id="00000000-0000-0000-0000-000000000002", project_name="demo-data", category="Storage", currency="EUR"}'
+        values: '50x120'
+      # demo-1, USD: 80 in total, under the budget: never fires.
+      - series: 'yagura_scaleway_consumption_amount{job="yagura", instance="demo-1.example.com:10100", project_id="00000000-0000-0000-0000-000000000001", project_name="demo-web", category="Compute", currency="USD"}'
+        values: '50x120'
+      - series: 'yagura_scaleway_consumption_amount{job="yagura", instance="demo-1.example.com:10100", project_id="00000000-0000-0000-0000-000000000001", project_name="demo-web", category="Network", currency="USD"}'
+        values: '30x120'
+      # demo-2 watches another organization: its 40 EUR is not added to
+      # demo-1's total, and stays under the budget: never fires.
+      - series: 'yagura_scaleway_consumption_amount{job="yagura", instance="demo-2.example.com:10100", project_id="00000000-0000-0000-0000-000000000003", project_name="demo-other", category="Compute", currency="EUR"}'
+        values: '40x120'
+    alert_rule_test:
+      - eval_time: 59m
+        alertname: YaguraMonthlyCostOverBudget
+        exp_alerts: []
+      - eval_time: 61m
+        alertname: YaguraMonthlyCostOverBudget
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: yagura
+              instance: demo-1.example.com:10100
+              currency: EUR
+            exp_annotations:
+              summary: "Scaleway month-to-date cost is over budget (EUR, demo-1.example.com:10100)"
+              description: "Scaleway consumption since the 1st of the month is 110.25 EUR, above the budget set in this alert rule."

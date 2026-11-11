@@ -9,6 +9,7 @@ import (
 	"github.com/samouraiworld/yagura/internal/gandi"
 	"github.com/samouraiworld/yagura/internal/httpx"
 	"github.com/samouraiworld/yagura/internal/poller"
+	"github.com/samouraiworld/yagura/internal/scaleway"
 	"github.com/samouraiworld/yagura/internal/statuspage"
 )
 
@@ -47,6 +48,18 @@ func buildPollers(cfg *config.Config, d deps) ([]poller.Poller, error) {
 			gandi.NewDomainsPoller(client, g.SharingID, g.DomainsInterval, logger),
 			gandi.NewBillingPoller(client, g.SharingID, g.BillingInterval, logger),
 		)
+	}
+	if s := cfg.Scaleway; s != nil {
+		client := httpx.New(httpx.Options{
+			Provider:  "scaleway",
+			BaseURL:   "https://api.scaleway.com",
+			Auth:      httpx.HeaderAuth("X-Auth-Token", s.SecretKey.Read),
+			RateLimit: 1,
+			Burst:     2,
+			Requests:  d.requests,
+		})
+		logger := d.logger.With("provider", "scaleway")
+		pollers = append(pollers, scaleway.NewConsumptionPoller(client, s.OrganizationID, s.Interval, logger))
 	}
 	return pollers, nil
 }

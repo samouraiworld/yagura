@@ -13,7 +13,8 @@ type Config struct {
 	LogLevel      slog.Level // YAGURA_LOG_LEVEL
 	LogFormat     string     // YAGURA_LOG_FORMAT
 	Statuspage    StatuspageConfig
-	Gandi         *GandiConfig // nil when YAGURA_GANDI_TOKEN is unset
+	Gandi         *GandiConfig    // nil when YAGURA_GANDI_TOKEN is unset
+	Scaleway      *ScalewayConfig // nil when YAGURA_SCALEWAY_SECRET_KEY is unset
 }
 
 // Load builds the configuration from lookup, validating every value.
@@ -52,6 +53,9 @@ func Load(lookup LookupFunc) (*Config, error) {
 		return nil, err
 	}
 	if c.Gandi, err = loadGandi(lookup); err != nil {
+		return nil, err
+	}
+	if c.Scaleway, err = loadScaleway(lookup); err != nil {
 		return nil, err
 	}
 	return c, nil
