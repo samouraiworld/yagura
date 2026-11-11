@@ -44,8 +44,8 @@ func loadStatuspage(lookup LookupFunc) (StatuspageConfig, error) {
 		{"YAGURA_STATUSPAGE_PAGES", defaultStatuspagePages},
 		{"YAGURA_STATUSPAGE_EXTRA_PAGES", ""},
 	} {
-		for _, entry := range list(lookup, v.name, v.def) {
-			page, err := parsePage(entry)
+		for i, entry := range list(lookup, v.name, v.def) {
+			page, err := parsePage(entry, i+1)
 			if err != nil {
 				return StatuspageConfig{}, fmt.Errorf("%s: %w", v.name, err)
 			}
@@ -65,19 +65,21 @@ func loadStatuspage(lookup LookupFunc) (StatuspageConfig, error) {
 	return sp, nil
 }
 
-// parsePage parses one name=baseURL entry.
-func parsePage(entry string) (StatuspagePage, error) {
+// parsePage parses one name=baseURL entry. pos is its 1-based position in its
+// variable. Errors identify the entry by position and never echo the raw entry
+// or an invalid name, which may hold credentials.
+func parsePage(entry string, pos int) (StatuspagePage, error) {
 	name, raw, ok := strings.Cut(entry, "=")
 	if !ok {
-		return StatuspagePage{}, fmt.Errorf("entry %q is not in the form name=url", entry)
+		return StatuspagePage{}, fmt.Errorf("entry %d: not in the form name=url", pos)
 	}
 	name, raw = strings.TrimSpace(name), strings.TrimSpace(raw)
 	if !pageName.MatchString(name) {
-		return StatuspagePage{}, fmt.Errorf("page name %q must match ^[a-z0-9_]+$", name)
+		return StatuspagePage{}, fmt.Errorf("entry %d: page name must match ^[a-z0-9_]+$", pos)
 	}
 	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return StatuspagePage{}, fmt.Errorf("page %q: URL must be http or https with a host", name)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" {
+		return StatuspagePage{}, fmt.Errorf("page %q: URL must use https with a host name", name)
 	}
 	if u.User != nil {
 		return StatuspagePage{}, fmt.Errorf("page %q: URL must not contain credentials", name)

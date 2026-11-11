@@ -46,14 +46,14 @@ func TestStatuspageReplaceAndExtra(t *testing.T) {
 	}
 }
 
-func TestStatuspageEmptyEntriesAndHTTP(t *testing.T) {
+func TestStatuspageEmptyEntriesAreSkipped(t *testing.T) {
 	sp, err := spConfig(t, map[string]string{
-		"YAGURA_STATUSPAGE_PAGES": " a = http://a.example.com ,, b=https://b.example.com,",
+		"YAGURA_STATUSPAGE_PAGES": " a = https://a.example.com ,, b=https://b.example.com,",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []StatuspagePage{{"a", "http://a.example.com"}, {"b", "https://b.example.com"}}
+	want := []StatuspagePage{{"a", "https://a.example.com"}, {"b", "https://b.example.com"}}
 	if !slices.Equal(sp.Pages, want) {
 		t.Fatalf("got %+v", sp.Pages)
 	}
@@ -74,6 +74,11 @@ func TestStatuspageValidation(t *testing.T) {
 		{"ftp", map[string]string{"YAGURA_STATUSPAGE_PAGES": "a=ftp://x.example.com"}, "YAGURA_STATUSPAGE_PAGES"},
 		{"no equals", map[string]string{"YAGURA_STATUSPAGE_PAGES": "a"}, "YAGURA_STATUSPAGE_PAGES"},
 		{"no host", map[string]string{"YAGURA_STATUSPAGE_PAGES": "a=https://"}, "YAGURA_STATUSPAGE_PAGES"},
+		{"http", map[string]string{"YAGURA_STATUSPAGE_PAGES": "a=http://a.example.com"}, "must use https"},
+		{"port only", map[string]string{"YAGURA_STATUSPAGE_PAGES": "a=https://:443"}, "must use https"},
+		{"credentials without name", map[string]string{"YAGURA_STATUSPAGE_PAGES": "https://user:s3cretpw@status.example.com"}, "entry 1: not in the form name=url"},         //nolint:gosec // fake credential, asserts rejection
+		{"credentials without name, query", map[string]string{"YAGURA_STATUSPAGE_PAGES": "https://user:s3cretpw@status.example.com/?x=1"}, "entry 1: page name must match"}, //nolint:gosec // fake credential, asserts rejection
+		{"bad name position", map[string]string{"YAGURA_STATUSPAGE_PAGES": "a=https://a.example.com,Bad=https://b.example.com"}, "entry 2: page name must match"},
 		{"query", map[string]string{"YAGURA_STATUSPAGE_PAGES": "a=https://a.example.com/?x=1"}, "YAGURA_STATUSPAGE_PAGES"},
 		{"userinfo", map[string]string{"YAGURA_STATUSPAGE_PAGES": "a=https://user:s3cretpw@a.example.com"}, "YAGURA_STATUSPAGE_PAGES"}, //nolint:gosec // fake credential, asserts rejection
 		{"fragment", map[string]string{"YAGURA_STATUSPAGE_PAGES": "a=https://a.example.com/#x"}, "YAGURA_STATUSPAGE_PAGES"},
