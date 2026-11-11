@@ -101,6 +101,9 @@ tests:
         values: '3456000x120'
       - series: 'yagura_gandi_domain_autorenew{domain="later.example.com"}'
         values: '0x120'
+      # Expires in 20 days, autorenew unknown (no series): fires.
+      - series: 'yagura_gandi_domain_expiry_timestamp_seconds{domain="unknown.example.com"}'
+        values: '1728000x120'
     alert_rule_test:
       - eval_time: 30m
         alertname: YaguraDomainExpiringWithoutAutorenew
@@ -113,7 +116,13 @@ tests:
               domain: expiring.example.com
             exp_annotations:
               summary: "Domain expiring.example.com expires soon and does not renew automatically"
-              description: "Domain expiring.example.com expires in 19d 22h 0m 0s and its autorenew is off. Renew it or turn autorenew on."
+              description: "Domain expiring.example.com has 19d 22h 0m 0s left before its registration ends (negative once it has ended), and its autorenew is off or unknown. Renew it or turn autorenew on."
+          - exp_labels:
+              severity: critical
+              domain: unknown.example.com
+            exp_annotations:
+              summary: "Domain unknown.example.com expires soon and does not renew automatically"
+              description: "Domain unknown.example.com has 19d 22h 0m 0s left before its registration ends (negative once it has ended), and its autorenew is off or unknown. Renew it or turn autorenew on."
 
   - interval: 1m
     input_series:

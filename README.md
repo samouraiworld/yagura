@@ -164,16 +164,24 @@ autorenew value exports no autorenew series; both are logged and count in
   `YAGURA_GANDI_SHARING_ID` to that organization's ID;
 - give it an expiry; one year is a reasonable choice, with the
   `YaguraCollectorFailing` alert to tell you when it has expired;
-- grant only the domain "see" permission and the billing "see" permission.
+- grant only the narrowest permission that lets it see domains and the
+  narrowest one that lets it see billing information. Both pollers run
+  whenever the token is set, so the token needs both.
 
-**Caveat, not confirmed:** Gandi publishes no list of PAT permissions.
-Secondary sources name the domain permission "See and renew domain names". If
-that is right, Gandi offers no strictly read-only domain permission, and a
-leaked yagura token could renew domains, which spends money. yagura itself
-only sends `GET` requests, enforced by a guard on every request (see the
-[security model](#security-model)), but that guard protects against yagura,
-not against someone who obtains the token. Keep the token in a file or a
-secret store, restrict it to one organization and give it an expiry.
+**Caveat, not confirmed:** we found no published list of Gandi PAT
+permissions, so their exact labels are not confirmed, for domains or for
+billing. Secondary sources name the domain permission "See and renew domain
+names". If that is right, Gandi offers no strictly read-only domain
+permission, and a leaked yagura token could renew domains, which spends
+money. yagura itself only sends `GET` requests, enforced by a guard on every
+request (see the [security model](#security-model)), but that guard protects
+against yagura, not against someone who obtains the token. Keep the token in
+a file or a secret store, restrict it to one organization and give it an
+expiry.
+
+With this collector on, `/metrics` shows every domain name of the
+organization and its prepaid balance. Turn on the web config (TLS, basic
+auth) or keep the port reachable only by your Prometheus server.
 
 For domains held at other registrars, use a WHOIS-based exporter such as
 [`shift/domain_exporter`](https://github.com/shift/domain_exporter). TLS

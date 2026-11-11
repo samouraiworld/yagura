@@ -41,13 +41,14 @@ groups:
 
       - alert: YaguraDomainExpiringWithoutAutorenew
         # Both series come from the same exporter, so they match on all labels.
-        expr: (yagura_gandi_domain_expiry_timestamp_seconds - time()) < 30 * 86400 and yagura_gandi_domain_autorenew == 0
+        # "unless ... == 1" also fires when the autorenew series is missing.
+        expr: (yagura_gandi_domain_expiry_timestamp_seconds - time()) < 30 * 86400 unless yagura_gandi_domain_autorenew == 1
         for: 1h
         labels:
           severity: critical
         annotations:
           summary: "Domain {{ $labels.domain }} expires soon and does not renew automatically"
-          description: "Domain {{ $labels.domain }} expires in {{ $value | humanizeDuration }} and its autorenew is off. Renew it or turn autorenew on."
+          description: "Domain {{ $labels.domain }} has {{ $value | humanizeDuration }} left before its registration ends (negative once it has ended), and its autorenew is off or unknown. Renew it or turn autorenew on."
 
       - alert: YaguraGandiPrepaidBalanceLow
         expr: yagura_gandi_prepaid_balance < yagura_gandi_prepaid_warning_threshold

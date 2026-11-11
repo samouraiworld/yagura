@@ -476,7 +476,7 @@
           "decimals": 2,
           "color": {
             "mode": "fixed",
-            "fixedColor": "green"
+            "fixedColor": "blue"
           }
         },
         "overrides": [
