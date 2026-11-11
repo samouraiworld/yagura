@@ -1,0 +1,4 @@
+[
+  {"fqdn": "d099.example.com", "autorenew": false, "dates": {"registry_ends_at": "2030-01-01T00:00:00Z"}},
+  {"fqdn": "e.example.com", "autorenew": true, "dates": {"registry_ends_at": "2027-06-01T00:00:00Z"}}
+]
