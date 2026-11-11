@@ -63,6 +63,10 @@ Go runtime and process metrics are also exposed.
 | `yagura_collector_last_duration_seconds` | gauge | `collector` | Duration of the last poll |
 | `yagura_collector_last_item_errors` | gauge | `collector` | Items failed or skipped in the last successful poll |
 | `yagura_collector_polls_total` | counter | `collector`, `result` | Poll attempts (`success` or `error`) |
+| `yagura_statuspage_indicator` | gauge | `provider` | Page indicator: `none`=0, `minor`=1, `major`=2, `critical`=3, anything else -1 |
+| `yagura_statuspage_unresolved_incidents` | gauge | `provider` | Unresolved incidents (omitted if the page does not serve them) |
+| `yagura_statuspage_active_maintenances` | gauge | `provider` | Active scheduled maintenances (omitted if the page does not serve them) |
+| `yagura_statuspage_updated_timestamp_seconds` | gauge | `provider` | Unix time of the page's `updated_at` |
 | `yagura_api_requests_total` | counter | `provider`, `code` | Outbound requests (HTTP status, or `error` for network failures) |
 | `yagura_build_info` | gauge | `version`, `revision`, `goversion` | Build metadata, always 1 |
 
@@ -96,6 +100,29 @@ prometheus.remote_write "default" {
   }
 }
 ```
+
+## Providers
+
+### Statuspage
+
+Polls any Atlassian Statuspage-compatible status page and exposes its overall
+indicator, the number of unresolved incidents and active maintenances, and
+the time the page was last updated. It needs no credentials and is enabled by
+default for four public pages (Supabase, Scaleway, Netlify, Gandi). One poller
+per page, named `statuspage_<name>`, with the `provider` label set to the
+page name. Metrics are listed in the [metric reference](#metric-reference).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `YAGURA_STATUSPAGE_ENABLED` | `true` | Disable the collector entirely |
+| `YAGURA_STATUSPAGE_PAGES` | `supabase=https://status.supabase.com,scaleway=https://status.scaleway.com,netlify=https://www.netlifystatus.com,gandi=https://status.gandi.net` | Comma-separated `name=baseURL`; replaces the default list |
+| `YAGURA_STATUSPAGE_EXTRA_PAGES` | empty | Same format, appended to the list |
+| `YAGURA_STATUSPAGE_INTERVAL` | `1m` | Poll interval (minimum 30s) |
+
+Names must match `^[a-z0-9_]+$` and be unique; URLs are `http` or `https`
+without query or fragment. Some pages only serve `status.json`: when the
+incidents or maintenances endpoint is missing, the matching metric is omitted
+for that page and the poll still succeeds.
 
 ## Target scale
 

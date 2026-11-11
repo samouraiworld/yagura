@@ -29,3 +29,12 @@ groups:
         annotations:
           summary: "yagura collector {{ $labels.collector }} skips items"
           description: "{{ $value }} item(s) failed or were skipped in the last successful poll of collector {{ $labels.collector }}."
+
+      - alert: YaguraProviderIncident
+        expr: yagura_statuspage_indicator >= 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Provider {{ $labels.provider }} reports a major incident"
+          description: "The status page of {{ $labels.provider }} has reported a major or critical indicator for 5 minutes."

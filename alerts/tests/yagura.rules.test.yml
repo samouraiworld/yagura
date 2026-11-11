@@ -57,3 +57,28 @@ tests:
             exp_annotations:
               summary: "yagura collector demo_items skips items"
               description: "2 item(s) failed or were skipped in the last successful poll of collector demo_items."
+
+  - interval: 1m
+    input_series:
+      # Major (2) for the whole window: fires after the 5m "for".
+      - series: 'yagura_statuspage_indicator{provider="demo_major"}'
+        values: '2x10'
+      # Minor (1): never fires.
+      - series: 'yagura_statuspage_indicator{provider="demo_minor"}'
+        values: '1x10'
+      # Critical (3) for only 3 minutes then back to none: never fires.
+      - series: 'yagura_statuspage_indicator{provider="demo_brief"}'
+        values: '3 3 3 0 0 0 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: YaguraProviderIncident
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: YaguraProviderIncident
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              provider: demo_major
+            exp_annotations:
+              summary: "Provider demo_major reports a major incident"
+              description: "The status page of demo_major has reported a major or critical indicator for 5 minutes."

@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/samourai-crew/yagura/internal/poller"
+	"github.com/samourai-crew/yagura/internal/statuspage"
 )
 
 // MetricNames returns the sorted, de-duplicated names of every metric yagura
@@ -15,6 +16,7 @@ func MetricNames() []string {
 	names = append(names, poller.SelfMetricNames...)
 	names = append(names, "yagura_api_requests_total", "yagura_build_info")
 	// Providers: append one `xxx.MetricNames...` line per provider package.
+	names = append(names, statuspage.MetricNames...)
 	slices.Sort(names)
 	return slices.Compact(names)
 }

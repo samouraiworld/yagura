@@ -14,4 +14,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Poller scheduler with self-monitoring metrics.
 - `/metrics` and `/healthz` endpoints and a landing page.
 - Distroless container image and a Docker Compose example.
+- Statuspage collector for Atlassian Statuspage-compatible pages (indicator, incidents, maintenances), the `YaguraProviderIncident` alert and a "Provider status" dashboard row.
 - CI and release workflows, secrets scanning and Dependabot.

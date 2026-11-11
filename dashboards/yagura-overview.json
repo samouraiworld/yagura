@@ -138,6 +138,139 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 6,
+      "type": "row",
+      "title": "Provider status",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 7,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 7,
+      "title": "Provider indicator",
+      "type": "state-timeline",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 18,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "${datasource}",
+          "expr": "yagura_statuspage_indicator",
+          "legendFormat": "{{provider}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "orange",
+                "value": 2
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "-1": {
+                  "text": "unknown",
+                  "color": "purple",
+                  "index": 0
+                },
+                "0": {
+                  "text": "OK",
+                  "color": "green",
+                  "index": 1
+                },
+                "1": {
+                  "text": "minor",
+                  "color": "yellow",
+                  "index": 2
+                },
+                "2": {
+                  "text": "major",
+                  "color": "orange",
+                  "index": 3
+                },
+                "3": {
+                  "text": "critical",
+                  "color": "red",
+                  "index": 4
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "title": "Unresolved incidents",
+      "type": "stat",
+      "datasource": "${datasource}",
+      "gridPos": {
+        "x": 18,
+        "y": 8,
+        "w": 6,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "${datasource}",
+          "expr": "yagura_statuspage_unresolved_incidents",
+          "legendFormat": "{{provider}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
     }
   ]
 }

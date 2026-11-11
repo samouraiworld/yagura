@@ -12,6 +12,7 @@ type Config struct {
 	WebConfigFile string     // YAGURA_WEB_CONFIG_FILE
 	LogLevel      slog.Level // YAGURA_LOG_LEVEL
 	LogFormat     string     // YAGURA_LOG_FORMAT
+	Statuspage    StatuspageConfig
 }
 
 // Load builds the configuration from lookup, validating every value.
@@ -44,6 +45,10 @@ func Load(lookup LookupFunc) (*Config, error) {
 			return nil, fmt.Errorf("YAGURA_LOG_FORMAT: %q is not one of logfmt, json", v)
 		}
 		c.LogFormat = v
+	}
+	var err error
+	if c.Statuspage, err = loadStatuspage(lookup); err != nil {
+		return nil, err
 	}
 	return c, nil
 }
