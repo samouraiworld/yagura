@@ -1,0 +1,1 @@
+{"page":{"id":"demo-page-1","name":"Demo Page","url":"https://status.example.com","updated_at":"2026-01-02T03:04:05.000+01:00"},"scheduled_maintenances":[{"id":"00000000-0000-0000-0000-000000000003","name":"demo-maintenance-one","status":"in_progress","impact":"maintenance"}]}
