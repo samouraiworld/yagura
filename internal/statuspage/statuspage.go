@@ -134,6 +134,8 @@ func (p *statusPoller) indicatorValue(s string) float64 {
 		return 2
 	case "critical":
 		return 3
+	case "maintenance":
+		return -2
 	}
 	p.logger.Warn("statuspage unknown indicator", "provider", p.name, "indicator", capped(s))
 	return -1
@@ -141,7 +143,7 @@ func (p *statusPoller) indicatorValue(s string) float64 {
 
 func knownIndicator(s string) bool {
 	switch s {
-	case "none", "minor", "major", "critical":
+	case "none", "minor", "major", "critical", "maintenance":
 		return true
 	}
 	return false

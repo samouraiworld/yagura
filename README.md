@@ -64,7 +64,7 @@ Go runtime and process metrics are also exposed.
 | `yagura_collector_last_duration_seconds` | gauge | `collector` | Duration of the last poll |
 | `yagura_collector_last_item_errors` | gauge | `collector` | Items failed or skipped in the last successful poll |
 | `yagura_collector_polls_total` | counter | `collector`, `result` | Poll attempts (`success` or `error`) |
-| `yagura_statuspage_indicator` | gauge | `provider` | Page indicator: `none`=0, `minor`=1, `major`=2, `critical`=3, anything else -1 |
+| `yagura_statuspage_indicator` | gauge | `provider` | Page indicator: `none`=0, `minor`=1, `major`=2, `critical`=3, `maintenance`=-2, anything else -1 |
 | `yagura_statuspage_unresolved_incidents` | gauge | `provider` | Unresolved incidents (omitted if the page does not serve them) |
 | `yagura_statuspage_active_maintenances` | gauge | `provider` | Active scheduled maintenances (omitted if the page does not serve them) |
 | `yagura_statuspage_updated_timestamp_seconds` | gauge | `provider` | Unix time of the page's `updated_at` |
@@ -126,8 +126,10 @@ page name. Metrics are listed in the [metric reference](#metric-reference).
 | `YAGURA_STATUSPAGE_EXTRA_PAGES` | empty | Same format, appended to the list |
 | `YAGURA_STATUSPAGE_INTERVAL` | `1m` | Poll interval (minimum 30s) |
 
-An unknown or missing indicator is exported as `-1` and counts in
-`yagura_collector_last_item_errors`.
+A `maintenance` indicator is exported as `-2`: it is a normal page state, so
+it logs no warning, counts no item error and stays below the
+`YaguraProviderIncident` threshold (`>= 2`). An unknown or missing indicator
+is exported as `-1` and counts in `yagura_collector_last_item_errors`.
 
 Names must match `^[a-z0-9_]+$` and be unique; URLs must be `https`
 without query or fragment. Redirects are not followed, so use the final URL of

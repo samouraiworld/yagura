@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Scaleway collector: month-to-date consumption per project, category and currency (`scaleway_consumption`), configured with `YAGURA_SCALEWAY_*`; the `YaguraMonthlyCostOverBudget` alert and a "Costs" dashboard row.
 
+### Fixed
+
+- Statuspage: the `maintenance` indicator is now a known state, exported as `-2`, with no warning and no item error, so `YaguraCollectorPartialFailure` no longer fires during a provider's maintenance. The dashboard maps `-2` to "maintenance".
+
 ## [0.2.0] - 2026-11-11
 
 ### Added
