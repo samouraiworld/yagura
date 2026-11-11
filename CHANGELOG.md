@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Gandi collector: domain registration end date and autorenew (`gandi_domains`), prepaid balance and warning threshold (`gandi_billing`), configured with `YAGURA_GANDI_*`; the `YaguraDomainExpiringWithoutAutorenew` and `YaguraGandiPrepaidBalanceLow` alerts and a "Domains" dashboard row.
+
 ## [0.1.0] - 2026-11-11
 
 ### Added

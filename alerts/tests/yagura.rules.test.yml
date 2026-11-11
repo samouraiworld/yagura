@@ -82,3 +82,61 @@ tests:
             exp_annotations:
               summary: "Provider demo_major reports a major incident"
               description: "The status page of demo_major has reported a major or critical indicator for 5 minutes."
+
+  - interval: 1m
+    input_series:
+      # Test time starts at 0, so an expiry of 1728000 is 20 days ahead.
+      # Expires in 20 days, autorenew off: fires after the 1h "for".
+      - series: 'yagura_gandi_domain_expiry_timestamp_seconds{domain="expiring.example.com"}'
+        values: '1728000x120'
+      - series: 'yagura_gandi_domain_autorenew{domain="expiring.example.com"}'
+        values: '0x120'
+      # Expires in 20 days, autorenew on: never fires.
+      - series: 'yagura_gandi_domain_expiry_timestamp_seconds{domain="renewing.example.com"}'
+        values: '1728000x120'
+      - series: 'yagura_gandi_domain_autorenew{domain="renewing.example.com"}'
+        values: '1x120'
+      # Expires in 40 days, autorenew off: never fires.
+      - series: 'yagura_gandi_domain_expiry_timestamp_seconds{domain="later.example.com"}'
+        values: '3456000x120'
+      - series: 'yagura_gandi_domain_autorenew{domain="later.example.com"}'
+        values: '0x120'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: YaguraDomainExpiringWithoutAutorenew
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: YaguraDomainExpiringWithoutAutorenew
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              domain: expiring.example.com
+            exp_annotations:
+              summary: "Domain expiring.example.com expires soon and does not renew automatically"
+              description: "Domain expiring.example.com expires in 19d 22h 0m 0s and its autorenew is off. Renew it or turn autorenew on."
+
+  - interval: 1m
+    input_series:
+      # Balance below the threshold: fires after the 1h "for".
+      - series: 'yagura_gandi_prepaid_balance{currency="EUR"}'
+        values: '10x120'
+      - series: 'yagura_gandi_prepaid_warning_threshold{currency="EUR"}'
+        values: '50x120'
+      # Balance above the threshold: never fires.
+      - series: 'yagura_gandi_prepaid_balance{currency="USD"}'
+        values: '100x120'
+      - series: 'yagura_gandi_prepaid_warning_threshold{currency="USD"}'
+        values: '50x120'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: YaguraGandiPrepaidBalanceLow
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: YaguraGandiPrepaidBalanceLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              currency: EUR
+            exp_annotations:
+              summary: "Gandi prepaid balance is low (EUR)"
+              description: "The Gandi prepaid balance is 10 EUR, below the warning threshold set in the Gandi account."

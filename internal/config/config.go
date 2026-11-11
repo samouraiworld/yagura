@@ -13,6 +13,7 @@ type Config struct {
 	LogLevel      slog.Level // YAGURA_LOG_LEVEL
 	LogFormat     string     // YAGURA_LOG_FORMAT
 	Statuspage    StatuspageConfig
+	Gandi         *GandiConfig // nil when YAGURA_GANDI_TOKEN is unset
 }
 
 // Load builds the configuration from lookup, validating every value.
@@ -48,6 +49,9 @@ func Load(lookup LookupFunc) (*Config, error) {
 	}
 	var err error
 	if c.Statuspage, err = loadStatuspage(lookup); err != nil {
+		return nil, err
+	}
+	if c.Gandi, err = loadGandi(lookup); err != nil {
 		return nil, err
 	}
 	return c, nil

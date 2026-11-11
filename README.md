@@ -68,6 +68,10 @@ Go runtime and process metrics are also exposed.
 | `yagura_statuspage_unresolved_incidents` | gauge | `provider` | Unresolved incidents (omitted if the page does not serve them) |
 | `yagura_statuspage_active_maintenances` | gauge | `provider` | Active scheduled maintenances (omitted if the page does not serve them) |
 | `yagura_statuspage_updated_timestamp_seconds` | gauge | `provider` | Unix time of the page's `updated_at` |
+| `yagura_gandi_domain_expiry_timestamp_seconds` | gauge | `domain` | Unix time at which the domain registration ends |
+| `yagura_gandi_domain_autorenew` | gauge | `domain` | 1 if the domain renews automatically, else 0 |
+| `yagura_gandi_prepaid_balance` | gauge | `currency` | Prepaid account balance (omitted if the account has no prepaid) |
+| `yagura_gandi_prepaid_warning_threshold` | gauge | `currency` | Balance below which Gandi sends a warning (omitted if the account has no prepaid) |
 | `yagura_api_requests_total` | counter | `provider`, `code` | Outbound requests (HTTP status, `invalid` for a status outside 100-599, or `error` for network failures) |
 | `yagura_build_info` | gauge | `version`, `revision`, `goversion` | Build metadata, always 1 |
 
@@ -129,6 +133,53 @@ the page. Some pages only serve `status.json`: when the
 incidents or maintenances endpoint is missing, the matching metric is omitted
 for that page and the poll still succeeds.
 
+### Gandi
+
+Watches the domains held at Gandi and the prepaid account balance through the
+Gandi API v5 (`https://api.gandi.net`). It is enabled when `YAGURA_GANDI_TOKEN`
+(or `YAGURA_GANDI_TOKEN_FILE`) is set and runs two pollers:
+
+- `gandi_domains` lists every domain and exports its registration end date and
+  whether it renews automatically.
+- `gandi_billing` reads the billing information and exports the prepaid balance
+  and its warning threshold. An account without prepaid exports no prepaid
+  series and the poll still succeeds.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `YAGURA_GANDI_TOKEN` (or `_FILE`) | empty | Personal access token; enables the collector |
+| `YAGURA_GANDI_SHARING_ID` | empty | Organization ID: restricts the domain list to it and reads its billing account |
+| `YAGURA_GANDI_DOMAINS_INTERVAL` | `6h` | Domains poll interval (minimum 30s) |
+| `YAGURA_GANDI_BILLING_INTERVAL` | `1h` | Billing poll interval (minimum 30s) |
+
+Metrics are listed in the [metric reference](#metric-reference). A domain
+without a valid registration end date is skipped, and a domain without an
+autorenew value exports no autorenew series; both are logged and count in
+`yagura_collector_last_item_errors`.
+
+**Token setup.** In the Gandi account settings, create a personal access token
+(PAT):
+
+- restrict it to the one organization yagura should watch, and set
+  `YAGURA_GANDI_SHARING_ID` to that organization's ID;
+- give it an expiry; one year is a reasonable choice, with the
+  `YaguraCollectorFailing` alert to tell you when it has expired;
+- grant only the domain "see" permission and the billing "see" permission.
+
+**Caveat, not confirmed:** Gandi publishes no list of PAT permissions.
+Secondary sources name the domain permission "See and renew domain names". If
+that is right, Gandi offers no strictly read-only domain permission, and a
+leaked yagura token could renew domains, which spends money. yagura itself
+only sends `GET` requests, enforced by a guard on every request (see the
+[security model](#security-model)), but that guard protects against yagura,
+not against someone who obtains the token. Keep the token in a file or a
+secret store, restrict it to one organization and give it an expiry.
+
+For domains held at other registrars, use a WHOIS-based exporter such as
+[`shift/domain_exporter`](https://github.com/shift/domain_exporter). TLS
+certificate expiry stays the job of
+[blackbox_exporter](https://github.com/prometheus/blackbox_exporter).
+
 ## Target scale
 
 yagura is sized for about 200 entities per provider per instance with the
@@ -161,7 +212,3 @@ default intervals. Beyond that, raise the poll intervals.
 ### Minimum token scopes
 
 Each provider section lists the minimum scopes its token needs.
-
-## Providers
-
-Provider sections are added as providers are implemented.
