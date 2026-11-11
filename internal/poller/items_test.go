@@ -203,3 +203,77 @@ func TestRunItemsPollDeadlineFails(t *testing.T) {
 		t.Errorf("itemErrors = %d, want 0", itemErrors)
 	}
 }
+
+func TestRunItemsNoSuccessFailsThePoll(t *testing.T) {
+	fn := func(_ context.Context, it string) ([]prometheus.Metric, error) {
+		return nil, &httpx.StatusError{Path: "/" + it, Code: 500}
+	}
+	_, itemErrors, err := RunItems(context.Background(), []string{"a", "b"}, fn)
+	if !errors.Is(err, ErrNoItemSucceeded) {
+		t.Fatalf("err = %v, want ErrNoItemSucceeded", err)
+	}
+	if itemErrors != 2 {
+		t.Errorf("itemErrors = %d, want 2", itemErrors)
+	}
+	if httpx.IsAuthError(err) {
+		t.Error("guard error must not match IsAuthError")
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Error("guard error must not match context.DeadlineExceeded")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("err = %q, want the text of an item error", err)
+	}
+}
+
+func TestRunItemsZeroSuccessGuard(t *testing.T) {
+	fn := func(_ context.Context, it string) ([]prometheus.Metric, error) {
+		switch it {
+		case "ok":
+			return []prometheus.Metric{metric(t, "ok")}, nil
+		case "gone":
+			return nil, &httpx.StatusError{Path: "/gone", Code: 404}
+		case "broken":
+			return nil, &httpx.StatusError{Path: "/broken", Code: 500}
+		case "partial":
+			return []prometheus.Metric{metric(t, "partial")}, &httpx.StatusError{Path: "/partial", Code: 500}
+		case "skipped":
+			return []prometheus.Metric{metric(t, "skipped")}, fmt.Errorf("demo: no expiry: %w", ErrItemSkipped)
+		default:
+			return nil, fmt.Errorf("GET /slow: %w", context.DeadlineExceeded)
+		}
+	}
+	tests := []struct {
+		name       string
+		items      []string
+		wantGuard  bool
+		wantErrors int
+		wantMetric int
+	}{
+		{"zero items", nil, false, 0, 0},
+		{"only gone", []string{"gone"}, false, 0, 0},
+		{"gone and broken", []string{"gone", "broken"}, true, 1, 0},
+		{"only partial", []string{"partial"}, true, 1, 1},
+		{"only skipped", []string{"skipped"}, false, 1, 1},
+		{"skipped and broken", []string{"skipped", "broken"}, true, 2, 1},
+		{"skipped ok broken", []string{"skipped", "ok", "broken"}, false, 2, 2},
+		{"item timeout only", []string{"slow"}, true, 1, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ms, itemErrors, err := RunItems(context.Background(), tc.items, fn)
+			if got := errors.Is(err, ErrNoItemSucceeded); got != tc.wantGuard {
+				t.Fatalf("err = %v, guard = %v, want %v", err, got, tc.wantGuard)
+			}
+			if !tc.wantGuard && err != nil {
+				t.Fatalf("err = %v, want nil", err)
+			}
+			if itemErrors != tc.wantErrors {
+				t.Errorf("itemErrors = %d, want %d", itemErrors, tc.wantErrors)
+			}
+			if len(ms) != tc.wantMetric {
+				t.Errorf("got %d metrics, want %d", len(ms), tc.wantMetric)
+			}
+		})
+	}
+}

@@ -15,13 +15,29 @@ import (
 // itemConcurrency bounds the per-item requests of one poll.
 const itemConcurrency = 4
 
+// ErrItemSkipped is wrapped (%w) by an item function that skips an item, for
+// example because a required field is missing. RunItems counts it in the item
+// errors; the item is neither a success nor a failure for the zero-success
+// guard. Metrics returned with it are kept.
+var ErrItemSkipped = errors.New("item skipped")
+
+// ErrNoItemSucceeded is wrapped by the error RunItems returns when at least
+// one item failed and none succeeded, so a total outage is never hidden
+// behind a successful poll.
+var ErrNoItemSucceeded = errors.New("no item succeeded")
+
 // RunItems calls fn for each item with a concurrency of 4. Metrics returned by
 // fn are kept even when fn also returns an error. Errors are classified as
 // follows: an auth error (401/403), an httpx.ErrPollDeadline (the rate
 // limiter has no time left), or any error once ctx is done, stops the run and
 // is returned, which fails the poll; a 404 drops the item silently;
-// any other error counts as an item error, including an item timeout while
-// ctx is still alive. A panic in fn is recovered and fails the run with an
+// an error wrapping ErrItemSkipped counts as an item error but is neither a
+// success nor a failure; any other error counts as an item error and a
+// failure, including an item timeout while ctx is still alive. Zero-success
+// guard: when at least one item failed and none succeeded, the run returns an
+// error wrapping ErrNoItemSucceeded (the item errors are described with %v
+// only, so auth and deadline classification never match it). Gone (404) and
+// skipped items count for neither side, and zero items succeeds. A panic in fn is recovered and fails the run with an
 // "item panicked" error that carries the stack. After a fatal error no new
 // item is started and RunItems waits for the in-flight ones. The order of the
 // returned metrics is not stable.
@@ -33,6 +49,9 @@ func RunItems[T any](ctx context.Context, items []T, fn func(context.Context, T)
 		mu         sync.Mutex
 		metrics    []prometheus.Metric
 		itemErrors int
+		successes  int
+		failures   int
+		firstErr   error
 		fatal      error
 	)
 	record := func(ms []prometheus.Metric, err error) {
@@ -40,7 +59,9 @@ func RunItems[T any](ctx context.Context, items []T, fn func(context.Context, T)
 		defer mu.Unlock()
 		metrics = append(metrics, ms...)
 		switch {
-		case err == nil, httpx.IsNotFound(err):
+		case err == nil:
+			successes++
+		case httpx.IsNotFound(err):
 		case isPanic(err):
 			// A panic is a bug: never hide it behind another fatal error.
 			fatal = errors.Join(fatal, err)
@@ -53,10 +74,16 @@ func RunItems[T any](ctx context.Context, items []T, fn func(context.Context, T)
 		case ctx.Err() != nil:
 			// The run is over; keep the context error, not a late failure.
 			fatal = ctx.Err()
+		case errors.Is(err, ErrItemSkipped):
+			itemErrors++
 		default:
 			// Since Go 1.23 transport timeouts match context.DeadlineExceeded;
 			// while the run is alive they belong to this item only.
 			itemErrors++
+			failures++
+			if firstErr == nil {
+				firstErr = err
+			}
 		}
 	}
 
@@ -90,6 +117,9 @@ dispatch:
 	if fatal == nil {
 		// The parent context may have ended without any item noticing.
 		fatal = ctx.Err()
+	}
+	if fatal == nil && failures > 0 && successes == 0 {
+		fatal = fmt.Errorf("%w: %d item(s) failed, first error: %v", ErrNoItemSucceeded, failures, firstErr)
 	}
 	return metrics, itemErrors, fatal
 }
