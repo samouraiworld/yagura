@@ -1,0 +1,84 @@
+package gandi
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/samouraiworld/yagura/internal/httpx"
+	"github.com/samouraiworld/yagura/internal/poller"
+)
+
+const billingPath = "/v5/billing/info"
+
+type billingPoller struct {
+	client    *httpx.Client
+	sharingID string
+	interval  time.Duration
+	logger    *slog.Logger
+}
+
+// NewBillingPoller returns the poller of the prepaid account, named
+// "gandi_billing". A non-empty sharingID queries that organization instead of
+// the caller's own account.
+func NewBillingPoller(client *httpx.Client, sharingID string, interval time.Duration, logger *slog.Logger) poller.Poller {
+	return &billingPoller{client: client, sharingID: sharingID, interval: interval, logger: logger}
+}
+
+func (p *billingPoller) Name() string            { return "gandi_billing" }
+func (p *billingPoller) Interval() time.Duration { return p.interval }
+
+type billingInfo struct {
+	Prepaid *struct {
+		Amount           *float64 `json:"amount"`
+		Currency         string   `json:"currency"`
+		WarningThreshold *float64 `json:"warning_threshold"`
+	} `json:"prepaid"`
+}
+
+// Poll reads the billing info and exports the prepaid balance and warning
+// threshold. An account without prepaid yields no series and no error.
+func (p *billingPoller) Poll(ctx context.Context) (poller.Result, error) {
+	path := billingPath
+	if p.sharingID != "" {
+		path += "/" + p.sharingID
+	}
+	var info *billingInfo
+	if _, err := p.client.GetJSON(ctx, path, nil, &info); err != nil {
+		return poller.Result{}, fmt.Errorf("gandi billing: %w", err)
+	}
+	if info == nil {
+		return poller.Result{}, fmt.Errorf("gandi billing: response is not an object")
+	}
+	pp := info.Prepaid
+	if pp == nil {
+		return poller.Result{}, nil
+	}
+	if pp.Currency == "" {
+		p.logger.Warn("gandi prepaid has no currency; series omitted")
+		return poller.Result{ItemErrors: 1}, nil
+	}
+
+	var metrics []prometheus.Metric
+	var itemErrors int
+	for _, f := range []struct {
+		desc  *prometheus.Desc
+		field string
+		value *float64
+	}{
+		{prepaidBalanceDesc, "amount", pp.Amount},
+		{prepaidThresholdDesc, "warning_threshold", pp.WarningThreshold},
+	} {
+		if f.value == nil {
+			p.logger.Warn("gandi prepaid field missing; series omitted",
+				"field", f.field, "currency", capped(pp.Currency))
+			itemErrors++
+			continue
+		}
+		metrics = append(metrics, gauge(f.desc, *f.value, pp.Currency))
+	}
+	return poller.Result{Metrics: metrics, ItemErrors: itemErrors}, nil
+}
