@@ -1,0 +1,8 @@
+[
+  {"name":"auth","status":"ACTIVE_HEALTHY"},
+  {"name":"db","status":"ACTIVE_HEALTHY"},
+  {"name":"pooler","status":"ACTIVE_HEALTHY"},
+  {"name":"realtime","status":"ACTIVE_HEALTHY"},
+  {"name":"rest","status":"ACTIVE_HEALTHY"},
+  {"name":"storage","status":"ACTIVE_HEALTHY"}
+]
