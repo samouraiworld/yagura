@@ -79,6 +79,9 @@ func parsePage(entry string) (StatuspagePage, error) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return StatuspagePage{}, fmt.Errorf("page %q: URL must be http or https with a host", name)
 	}
+	if u.User != nil {
+		return StatuspagePage{}, fmt.Errorf("page %q: URL must not contain credentials", name)
+	}
 	if u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(raw, "?#") {
 		return StatuspagePage{}, fmt.Errorf("page %q: URL must not contain a query or fragment", name)
 	}

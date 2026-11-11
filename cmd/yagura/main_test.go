@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -44,4 +45,9 @@ func TestBuildPollersStatuspage(t *testing.T) {
 	if err != nil || len(ps) != 0 {
 		t.Fatalf("disabled: %v %v", ps, err)
 	}
+}
+
+func TestMain(m *testing.M) {
+	httpx.SetDialGuard(httpx.LoopbackOnly)
+	os.Exit(m.Run())
 }

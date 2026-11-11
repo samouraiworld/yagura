@@ -75,6 +75,7 @@ func TestStatuspageValidation(t *testing.T) {
 		{"no equals", map[string]string{"YAGURA_STATUSPAGE_PAGES": "a"}, "YAGURA_STATUSPAGE_PAGES"},
 		{"no host", map[string]string{"YAGURA_STATUSPAGE_PAGES": "a=https://"}, "YAGURA_STATUSPAGE_PAGES"},
 		{"query", map[string]string{"YAGURA_STATUSPAGE_PAGES": "a=https://a.example.com/?x=1"}, "YAGURA_STATUSPAGE_PAGES"},
+		{"userinfo", map[string]string{"YAGURA_STATUSPAGE_PAGES": "a=https://user:s3cretpw@a.example.com"}, "YAGURA_STATUSPAGE_PAGES"}, //nolint:gosec // fake credential, asserts rejection
 		{"fragment", map[string]string{"YAGURA_STATUSPAGE_PAGES": "a=https://a.example.com/#x"}, "YAGURA_STATUSPAGE_PAGES"},
 		{"empty list", map[string]string{"YAGURA_STATUSPAGE_PAGES": " , "}, "YAGURA_STATUSPAGE_PAGES"},
 		{"interval too short", map[string]string{"YAGURA_STATUSPAGE_INTERVAL": "10s"}, "YAGURA_STATUSPAGE_INTERVAL"},
@@ -85,6 +86,9 @@ func TestStatuspageValidation(t *testing.T) {
 			_, err := spConfig(t, tc.env)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("want error naming %s, got %v", tc.want, err)
+			}
+			if strings.Contains(err.Error(), "s3cretpw") {
+				t.Fatalf("error leaks the credential: %v", err)
 			}
 		})
 	}
