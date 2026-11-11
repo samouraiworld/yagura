@@ -294,6 +294,9 @@ func TestHasNextLink(t *testing.T) {
 		{"comma in quoted param", []string{`<a>; title="x, y"; rel="next"`}, true},
 		{"comma in url", []string{`<https://x.invalid/?q=1,2>; rel="next"`}, true},
 		{"comma in url prev", []string{`<https://x.invalid/?q=1,2>; rel="prev"`}, false},
+		{"quoted comma and link", []string{`<a>; title="x, <ignored>; rel=next"; rel=prev`}, false},
+		{"escaped quote", []string{`<a>; title="x\", <b>; rel=next"; rel=prev`}, false},
+		{"unterminated quote", []string{`<a>; title="x, <b>; rel=next`}, false},
 		{"garbage", []string{`next`}, false},
 	}
 	for _, tc := range tests {

@@ -58,7 +58,7 @@ func hasNextLink(h http.Header) bool {
 			if !ok {
 				continue
 			}
-			for _, param := range strings.Split(params, ";") {
+			for _, param := range splitUnquoted(params, ';', func(string) bool { return true }) {
 				k, val, ok := strings.Cut(strings.TrimSpace(param), "=")
 				if !ok || !strings.EqualFold(strings.TrimSpace(k), "rel") {
 					continue
@@ -74,19 +74,34 @@ func hasNextLink(h http.Header) bool {
 	return false
 }
 
-// splitLinks splits a Link header value into its links, cutting only at a
-// comma that is followed by optional spaces and "<" so commas inside URLs or
-// quoted parameters do not split a link.
-func splitLinks(v string) []string {
+// splitUnquoted splits v at each sep byte that is outside a quoted string
+// (backslash escapes honoured inside quotes) and for which ok(rest) holds,
+// rest being the text after the separator. An unterminated quote simply keeps
+// the remainder in the last piece.
+func splitUnquoted(v string, sep byte, ok func(rest string) bool) []string {
 	var out []string
 	start := 0
+	inQuote := false
 	for i := 0; i < len(v); i++ {
-		if v[i] == ',' && strings.HasPrefix(strings.TrimLeft(v[i+1:], " \t"), "<") {
+		switch c := v[i]; {
+		case inQuote && c == '\\':
+			i++
+		case c == '"':
+			inQuote = !inQuote
+		case c == sep && !inQuote && ok(v[i+1:]):
 			out = append(out, v[start:i])
 			start = i + 1
 		}
 	}
 	return append(out, v[start:])
+}
+
+// splitLinks splits a Link header value into its links, cutting only at a
+// comma outside quotes that is followed by optional spaces and "<".
+func splitLinks(v string) []string {
+	return splitUnquoted(v, ',', func(rest string) bool {
+		return strings.HasPrefix(strings.TrimLeft(rest, " \t"), "<")
+	})
 }
 
 // listSites returns the sites of every page, requesting page=N itself and
