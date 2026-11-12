@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/yagura-logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="assets/yagura-logo.svg">
+    <img src="assets/yagura-logo.svg" alt="yagura logo" width="140">
+  </picture>
+</p>
+
 # yagura
 
 yagura (Japanese for "watchtower") is a Prometheus exporter that watches the
