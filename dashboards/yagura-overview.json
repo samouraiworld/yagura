@@ -916,6 +916,356 @@
           }
         ]
       }
+    },
+    {
+      "id": 19,
+      "title": "Netlify",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 49,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 20,
+      "title": "Netlify sites",
+      "type": "table",
+      "datasource": "${datasource}",
+      "description": "Last production deploy of every Netlify site the token can see: its state as Netlify reports it, whether it failed (state error, where YaguraNetlifyLastDeployFailed fires) and how long ago it was created. A site with no production deploy is not listed. An exporter instance whose last poll failed is left out.",
+      "gridPos": {
+        "x": 0,
+        "y": 50,
+        "w": 14,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "${datasource}",
+          "expr": "max by (site, account, state) (yagura_netlify_last_deploy_info and on (job, instance) (yagura_collector_up{collector=\"netlify_deploys\"} == 1))",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "datasource": "${datasource}",
+          "expr": "max by (site) (yagura_netlify_last_deploy_failed and on (job, instance) (yagura_collector_up{collector=\"netlify_deploys\"} == 1))",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "C",
+          "datasource": "${datasource}",
+          "expr": "time() - max by (site) (yagura_netlify_last_deploy_created_timestamp_seconds and on (job, instance) (yagura_collector_up{collector=\"netlify_deploys\"} == 1))",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "includeByName": {
+              "site": true,
+              "account": true,
+              "state": true,
+              "Value #B": true,
+              "Value #C": true
+            },
+            "indexByName": {
+              "site": 0,
+              "account": 1,
+              "state": 2,
+              "Value #B": 3,
+              "Value #C": 4
+            },
+            "renameByName": {
+              "site": "Site",
+              "account": "Team",
+              "state": "State",
+              "Value #B": "Failed",
+              "Value #C": "Last deploy age"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Site",
+                "desc": false
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "State"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "ready": {
+                        "color": "green",
+                        "index": 0
+                      },
+                      "error": {
+                        "color": "red",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": ".*",
+                      "result": {
+                        "color": "orange",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Failed"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "No",
+                        "color": "green",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "Yes",
+                        "color": "red",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Last deploy age"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 21,
+      "title": "Netlify build minutes",
+      "type": "table",
+      "datasource": "${datasource}",
+      "description": "Build minutes used by each team in the current billing period, against the minutes included in its plan. Orange from 80% of the allowance, red once it is used up. A plan with no numeric allowance leaves Included and Used share empty. An exporter instance whose last poll failed is left out.",
+      "gridPos": {
+        "x": 14,
+        "y": 50,
+        "w": 10,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "${datasource}",
+          "expr": "max by (account) (yagura_netlify_build_minutes_used and on (job, instance) (yagura_collector_up{collector=\"netlify_builds\"} == 1))",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "datasource": "${datasource}",
+          "expr": "max by (account) (yagura_netlify_build_minutes_included and on (job, instance) (yagura_collector_up{collector=\"netlify_builds\"} == 1))",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "C",
+          "datasource": "${datasource}",
+          "expr": "max by (account) (yagura_netlify_build_minutes_used and on (job, instance) (yagura_collector_up{collector=\"netlify_builds\"} == 1)) / (max by (account) (yagura_netlify_build_minutes_included and on (job, instance) (yagura_collector_up{collector=\"netlify_builds\"} == 1)) > 0)",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "D",
+          "datasource": "${datasource}",
+          "expr": "max by (account) (yagura_netlify_build_period_end_timestamp_seconds and on (job, instance) (yagura_collector_up{collector=\"netlify_builds\"} == 1)) - time()",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "includeByName": {
+              "account": true,
+              "Value #A": true,
+              "Value #B": true,
+              "Value #C": true,
+              "Value #D": true
+            },
+            "indexByName": {
+              "account": 0,
+              "Value #A": 1,
+              "Value #B": 2,
+              "Value #C": 3,
+              "Value #D": 4
+            },
+            "renameByName": {
+              "account": "Team",
+              "Value #A": "Used",
+              "Value #B": "Included",
+              "Value #C": "Used share",
+              "Value #D": "Period ends in"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Team",
+                "desc": false
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Used share"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 0.8
+                    },
+                    {
+                      "color": "red",
+                      "value": 1
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Period ends in"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }

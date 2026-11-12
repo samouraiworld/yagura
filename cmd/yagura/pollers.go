@@ -8,6 +8,7 @@ import (
 	"github.com/samouraiworld/yagura/internal/config"
 	"github.com/samouraiworld/yagura/internal/gandi"
 	"github.com/samouraiworld/yagura/internal/httpx"
+	"github.com/samouraiworld/yagura/internal/netlify"
 	"github.com/samouraiworld/yagura/internal/poller"
 	"github.com/samouraiworld/yagura/internal/scaleway"
 	"github.com/samouraiworld/yagura/internal/statuspage"
@@ -76,6 +77,22 @@ func buildPollers(cfg *config.Config, d deps) ([]poller.Poller, error) {
 		pollers = append(pollers,
 			supabase.NewProjectsPoller(client, s.HealthServices, s.HealthInterval, logger),
 			supabase.NewDiskPoller(client, s.DiskInterval, logger),
+		)
+	}
+	if n := cfg.Netlify; n != nil {
+		client := httpx.New(httpx.Options{
+			Provider:   "netlify",
+			BaseURL:    "https://api.netlify.com",
+			Auth:       httpx.BearerAuth(n.Token.Read),
+			RateLimit:  4,
+			Burst:      8,
+			ResetDelay: httpx.ResetUnix,
+			Requests:   d.requests,
+		})
+		logger := d.logger.With("provider", "netlify")
+		pollers = append(pollers,
+			netlify.NewDeploysPoller(client, n.DeploysInterval, logger),
+			netlify.NewBuildsPoller(client, n.BuildsInterval, logger),
 		)
 	}
 	return pollers, nil

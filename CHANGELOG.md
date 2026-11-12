@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Supabase collector: project status, service health (`supabase_projects`) and disk utilisation (`supabase_disk`) of every project the token can see, configured with `YAGURA_SUPABASE_*`; the `YaguraSupabaseProjectUnhealthy` and `YaguraSupabaseDiskAlmostFull` alerts and a "Supabase" dashboard row. The README also shows how to scrape the per-project Supabase Metrics API directly.
+- Netlify collector: state of the last production deploy of every site (`netlify_deploys`) and build minutes used and included per team (`netlify_builds`), configured with `YAGURA_NETLIFY_*`; the `YaguraNetlifyLastDeployFailed` alert and a "Netlify" dashboard row.
 
 ### Fixed
 
