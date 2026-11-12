@@ -11,6 +11,7 @@ import (
 	"github.com/samouraiworld/yagura/internal/poller"
 	"github.com/samouraiworld/yagura/internal/scaleway"
 	"github.com/samouraiworld/yagura/internal/statuspage"
+	"github.com/samouraiworld/yagura/internal/supabase"
 )
 
 // deps holds what provider pollers need to be built.
@@ -60,6 +61,22 @@ func buildPollers(cfg *config.Config, d deps) ([]poller.Poller, error) {
 		})
 		logger := d.logger.With("provider", "scaleway")
 		pollers = append(pollers, scaleway.NewConsumptionPoller(client, s.OrganizationID, s.Interval, logger))
+	}
+	if s := cfg.Supabase; s != nil {
+		client := httpx.New(httpx.Options{
+			Provider:   "supabase",
+			BaseURL:    "https://api.supabase.com",
+			Auth:       httpx.BearerAuth(s.Token.Read),
+			RateLimit:  10,
+			Burst:      10,
+			ResetDelay: httpx.ResetSeconds,
+			Requests:   d.requests,
+		})
+		logger := d.logger.With("provider", "supabase")
+		pollers = append(pollers,
+			supabase.NewProjectsPoller(client, s.HealthServices, s.HealthInterval, logger),
+			supabase.NewDiskPoller(client, s.DiskInterval, logger),
+		)
 	}
 	return pollers, nil
 }

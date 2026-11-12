@@ -76,6 +76,12 @@ Go runtime and process metrics are also exposed.
 | `yagura_gandi_prepaid_warning_threshold` | gauge | `currency` | Balance below which Gandi sends a warning (omitted if the account has no prepaid or no threshold set; omitted with an item error if it is not a number) |
 | `yagura_scaleway_consumption_amount` | gauge | `project_id`, `project_name`, `category`, `currency` | Consumption month to date, as reported by the Scaleway billing API; resets on the 1st |
 | `yagura_scaleway_consumption_updated_timestamp_seconds` | gauge | none | Unix time of the billing API's last consumption update (omitted if the API does not send a valid one) |
+| `yagura_supabase_project_info` | gauge | `project_ref`, `project_name`, `organization_slug`, `region` | Always 1; carries the project's name, organization and region |
+| `yagura_supabase_project_status` | gauge | `project_ref`, `status` | State set: 1 for the project's current status, 0 for every other known status; an unknown status gets its own series with 1 |
+| `yagura_supabase_service_healthy` | gauge | `project_ref`, `service` | 1 if the service reports `ACTIVE_HEALTHY`, else 0; active projects only; 0 for every requested service when the project's health call fails |
+| `yagura_supabase_disk_size_bytes` | gauge | `project_ref` | Size of the project's disk; active projects only |
+| `yagura_supabase_disk_used_bytes` | gauge | `project_ref` | Used space on the project's disk; active projects only |
+| `yagura_supabase_disk_available_bytes` | gauge | `project_ref` | Available space on the project's disk; active projects only |
 | `yagura_api_requests_total` | counter | `provider`, `code` | Outbound requests (HTTP status, `invalid` for a status outside 100-599, or `error` for network failures) |
 | `yagura_build_info` | gauge | `version`, `revision`, `goversion` | Build metadata, always 1 |
 
@@ -347,10 +353,159 @@ Its inventory collectors need read access to those resources, beyond
 `BillingReadOnly`: give it its own IAM application and key rather than
 widening yagura's policy.
 
+### Supabase
+
+Watches the status, service health and disk usage of Supabase projects
+through the Supabase Management API (`https://api.supabase.com`). It is
+enabled when `YAGURA_SUPABASE_TOKEN` (or `YAGURA_SUPABASE_TOKEN_FILE`) is set
+and runs two pollers, which share one rate limiter:
+
+- `supabase_projects` lists the projects and exports their status, then asks
+  each active project (status `ACTIVE_HEALTHY` or `ACTIVE_UNHEALTHY`) for the
+  health of the services in `YAGURA_SUPABASE_HEALTH_SERVICES`. A paused
+  project has the status `INACTIVE`: it is listed, but its health is not
+  requested and it exports no health series.
+- `supabase_disk` lists the projects again and reads the disk utilisation of
+  each active project.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `YAGURA_SUPABASE_TOKEN` (or `_FILE`) | empty | Personal access token (`sbp_…`); enables the collector |
+| `YAGURA_SUPABASE_HEALTH_INTERVAL` | `1m` | Projects and health poll interval (minimum 30s) |
+| `YAGURA_SUPABASE_HEALTH_SERVICES` | `auth,db,pooler,realtime,rest,storage` | Services whose health is requested, comma-separated; allowed: `auth`, `db`, `db_postgres_user`, `pooler`, `realtime`, `rest`, `storage`, `pg_bouncer` |
+| `YAGURA_SUPABASE_DISK_INTERVAL` | `5m` | Disk poll interval (minimum 30s) |
+
+Metrics are listed in the [metric reference](#metric-reference). When the
+health call of one project fails while other projects answer, yagura logs it,
+counts it in `yagura_collector_last_item_errors` and reports every requested
+service of that project as unhealthy; a failed disk call omits that project's
+disk series. When the call of every active project fails (for example with a
+single project), the poll fails instead: yagura keeps serving the last values
+and `YaguraCollectorFailing` fires after 15 minutes. A project that disappears
+between the list and the call (HTTP 404) is left out without an error. A 401
+or 403 fails the whole poll, so a token that lacks one permission makes its
+poller fail; `yagura_api_requests_total` then shows code `403` for `supabase`.
+
+Each poll must finish within 80% of its interval, and the health calls run
+four at a time, each allowed up to 5 seconds on the Supabase side. With more
+than a few dozen active projects, raise `YAGURA_SUPABASE_HEALTH_INTERVAL`.
+
+**Token setup.** On the Access Tokens page of your Supabase account settings,
+create a *scoped* personal access token:
+
+- start from the **No access** preset, not **Read-only**: the Read-only
+  preset also lets the token read API keys and secrets;
+- restrict it to the organization yagura should watch. **Not confirmed:**
+  whether a token restricted to some projects lists only those. If it lists
+  others, their health calls answer 403 and every poll fails; restrict the
+  token to the whole organization then;
+- give it an expiry date (Supabase allows up to one year); the
+  `YaguraCollectorFailing` alert tells you when it has expired;
+- grant only these **Read** permissions:
+  - "Projects (account-wide)", to list the projects;
+  - "Project Settings", for service health. **Not confirmed:** this label is
+    taken from the Supabase permission table for the health endpoint, whose
+    internal name is `project_admin_read`; it has not been checked with a
+    real token yet. Nor has whether it also lets the token read the
+    project's API keys; see the check below;
+  - "Disk Config", for disk utilisation.
+
+Check once that the token cannot read the project's API keys. This command
+prints only the HTTP status, never the response, and should print `403`:
+
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -H "Authorization: Bearer $(cat /run/secrets/supabase_token)" \
+  https://api.supabase.com/v1/projects/<project-ref>/api-keys
+```
+
+If it prints `200`, the token can read the project's secret API keys, and
+yagura cannot work without that permission: store the token as carefully as
+those keys, or do not enable the collector.
+
+Supabase cannot change the permissions of an existing token: to change them,
+create a new token and delete the old one.
+
+With this collector on, `/metrics` shows the name, organization and region of
+every project the token can see. Turn on the web config (TLS, basic auth) or
+keep the port reachable only by your Prometheus server.
+
+The `YaguraSupabaseProjectUnhealthy` alert fires when a project reports
+`ACTIVE_UNHEALTHY`, `INIT_FAILED`, `RESTORE_FAILED`, `PAUSE_FAILED` or `UNKNOWN`, or one
+service of an active project is not healthy, for 5 minutes. The services of an
+`ACTIVE_UNHEALTHY` project do not raise their own alerts. A health call that
+keeps failing raises it too while other projects answer, since it reports
+every service as unhealthy. `YaguraSupabaseDiskAlmostFull` fires when a
+project's disk stays more than 80% full for 15 minutes.
+
+If your scrape configuration adds a target label named `service`, Prometheus
+renames yagura's own `service` label to `exported_service` (unless
+`honor_labels` is on); the health panel and alert then show the wrong service
+name.
+
+#### Database metrics (Supabase Metrics API)
+
+yagura does not read database metrics. Each project serves them, in the
+Prometheus format, at
+`https://<project-ref>.supabase.co/customer/v1/privileged/metrics` (in beta,
+not available for self-hosted Supabase). Scrape that endpoint directly, once
+a minute, with HTTP Basic authentication: user `service_role`, password a
+secret API key (`sb_secret_…`) created under Project Settings → API Keys.
+Ready-made dashboards are in
+[`supabase/supabase-grafana`](https://github.com/supabase/supabase-grafana).
+
+**Security note:** a secret API key bypasses Row Level Security and gives
+full access to the project's data. Store it like a database superuser
+password: in a file readable only by the scraper, never inline in a
+configuration file you commit. Create a dedicated key for metrics so you can
+revoke it alone, and rotate it on a schedule. This key is separate from the
+yagura token: yagura never needs it.
+
+Prometheus:
+
+```yaml
+scrape_configs:
+  - job_name: supabase
+    scrape_interval: 60s
+    scheme: https
+    metrics_path: /customer/v1/privileged/metrics
+    follow_redirects: false
+    basic_auth:
+      username: service_role
+      password_file: /etc/prometheus/supabase-secret-key
+    static_configs:
+      - targets: ["<project-ref>.supabase.co"]
+```
+
+Grafana Alloy:
+
+```alloy
+prometheus.scrape "supabase" {
+  targets          = [{"__address__" = "<project-ref>.supabase.co"}]
+  scheme           = "https"
+  metrics_path     = "/customer/v1/privileged/metrics"
+  follow_redirects = false
+  scrape_interval  = "60s"
+  forward_to       = [prometheus.remote_write.default.receiver]
+
+  basic_auth {
+    username      = "service_role"
+    password_file = "/etc/alloy/supabase-secret-key"
+  }
+}
+```
+
+Redirects are turned off so the key is never sent to another host. Add one
+target per project, each with its own secret API key (one scrape job or
+component per project).
+
 ## Target scale
 
 yagura is sized for about 200 entities per provider per instance with the
-default intervals. Beyond that, raise the poll intervals.
+default intervals. Beyond that, raise the poll intervals. Supabase is the
+exception: its health poll makes one call per active project every minute, so
+with more than a few dozen active projects, raise
+`YAGURA_SUPABASE_HEALTH_INTERVAL`.
 
 ## Dashboard and alerts
 

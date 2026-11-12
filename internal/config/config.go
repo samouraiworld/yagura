@@ -15,6 +15,7 @@ type Config struct {
 	Statuspage    StatuspageConfig
 	Gandi         *GandiConfig    // nil when YAGURA_GANDI_TOKEN is unset
 	Scaleway      *ScalewayConfig // nil when YAGURA_SCALEWAY_SECRET_KEY is unset
+	Supabase      *SupabaseConfig // nil when YAGURA_SUPABASE_TOKEN is unset
 }
 
 // Load builds the configuration from lookup, validating every value.
@@ -56,6 +57,9 @@ func Load(lookup LookupFunc) (*Config, error) {
 		return nil, err
 	}
 	if c.Scaleway, err = loadScaleway(lookup); err != nil {
+		return nil, err
+	}
+	if c.Supabase, err = loadSupabase(lookup); err != nil {
 		return nil, err
 	}
 	return c, nil

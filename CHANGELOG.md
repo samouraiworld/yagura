@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Supabase collector: project status, service health (`supabase_projects`) and disk utilisation (`supabase_disk`) of every project the token can see, configured with `YAGURA_SUPABASE_*`; the `YaguraSupabaseProjectUnhealthy` and `YaguraSupabaseDiskAlmostFull` alerts and a "Supabase" dashboard row. The README also shows how to scrape the per-project Supabase Metrics API directly.
+
+### Fixed
+
+- Supabase: the warning logged when the health or disk call of one project fails now keeps the cause (HTTP status or decoding problem) instead of cutting the error text at 64 bytes.
+
 ## [0.3.0] - 2026-11-11
 
 ### Added

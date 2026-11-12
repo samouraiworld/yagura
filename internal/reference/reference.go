@@ -9,6 +9,7 @@ import (
 	"github.com/samouraiworld/yagura/internal/poller"
 	"github.com/samouraiworld/yagura/internal/scaleway"
 	"github.com/samouraiworld/yagura/internal/statuspage"
+	"github.com/samouraiworld/yagura/internal/supabase"
 )
 
 // MetricNames returns the sorted, de-duplicated names of every metric yagura
@@ -21,6 +22,7 @@ func MetricNames() []string {
 	names = append(names, statuspage.MetricNames...)
 	names = append(names, gandi.MetricNames...)
 	names = append(names, scaleway.MetricNames...)
+	names = append(names, supabase.MetricNames...)
 	slices.Sort(names)
 	return slices.Compact(names)
 }
