@@ -237,8 +237,10 @@ func (p *projectsPoller) health(ctx context.Context, pr project) ([]prometheus.M
 const maxLogValue = 64
 
 // maxLogError caps error text written to the logs. It is larger than
-// maxLogValue so the cause survives: httpx errors carry only the method, path
-// and status (never query or headers) and the refs in the path are validated.
+// maxLogValue so the cause survives. httpx errors carry the method, path and
+// status, or a standard-library cause (JSON type and field names, a network or
+// TLS error); never the query, headers or body. The refs in the path are
+// validated.
 const maxLogError = 256
 
 // cappedError returns at most maxLogError bytes of err's text, marking a cut.

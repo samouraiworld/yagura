@@ -3,6 +3,7 @@ package supabase
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"net/http/httptest"
 	"os"
@@ -172,6 +173,48 @@ func TestProjectsHealthCallFails(t *testing.T) {
 	}
 	if res.ItemErrors != 1 {
 		t.Errorf("ItemErrors = %d, want 1", res.ItemErrors)
+	}
+}
+
+// TestPollFailsWhenEveryItemFails pins what the README and the alert comment
+// say: when the call of every active project fails, the poll fails (the
+// scheduler keeps the last values) instead of exporting unhealthy services.
+func TestPollFailsWhenEveryItemFails(t *testing.T) {
+	const oneProject = `[{"ref":"` + refA + `","name":"demo-app","organization_slug":"demo-org","region":"eu-west-1","status":"ACTIVE_HEALTHY"}]`
+	for name, p := range map[string]poller.Poller{
+		"health": func() poller.Poller {
+			p, _ := newPoller(t, map[string]testkit.Route{
+				"/v1/projects": {Body: oneProject},
+				healthPathA:    {Status: 500, Body: `{"message":"demo failure"}`},
+			}, &bytes.Buffer{})
+			return p
+		}(),
+		"disk": func() poller.Poller {
+			p, _ := newDiskPoller(t, map[string]testkit.Route{
+				"/v1/projects": {Body: oneProject},
+				diskPathA:      {Status: 500, Body: `{"message":"demo failure"}`},
+			}, &bytes.Buffer{})
+			return p
+		}(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := poll(t, p); !errors.Is(err, poller.ErrNoItemSucceeded) {
+				t.Fatalf("err = %v, want ErrNoItemSucceeded", err)
+			}
+		})
+	}
+}
+
+func TestCappedError(t *testing.T) {
+	for _, n := range []int{maxLogError - 1, maxLogError} {
+		s := strings.Repeat("x", n)
+		if got := cappedError(errors.New(s)); got != s {
+			t.Errorf("%d bytes: got %q, want it unchanged", n, got)
+		}
+	}
+	got := cappedError(errors.New(strings.Repeat("x", maxLogError) + "demo-suffix"))
+	if got != strings.Repeat("x", maxLogError)+"...(truncated)" {
+		t.Errorf("over the cap: got %q", got)
 	}
 }
 

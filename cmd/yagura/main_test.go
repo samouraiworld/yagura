@@ -156,6 +156,54 @@ func TestBuildPollersScalewayLoggerProvider(t *testing.T) {
 	}
 }
 
+// supabaseLookup enables only the Supabase collector.
+func supabaseLookup(k string) (string, bool) {
+	switch k {
+	case "YAGURA_SUPABASE_TOKEN":
+		return "test-token", true
+	case "YAGURA_STATUSPAGE_ENABLED":
+		return "false", true
+	}
+	return "", false
+}
+
+func TestBuildPollersSupabase(t *testing.T) {
+	cfg, err := config.Load(supabaseLookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps, err := buildPollers(cfg, deps{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), requests: httpx.NewRequestsCounter()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, p := range ps {
+		got = append(got, p.Name())
+	}
+	want := []string{"supabase_projects", "supabase_disk"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if ps[0].Interval() != cfg.Supabase.HealthInterval || ps[1].Interval() != cfg.Supabase.DiskInterval {
+		t.Fatalf("intervals: %v %v", ps[0].Interval(), ps[1].Interval())
+	}
+}
+
+func TestBuildPollersSupabaseLoggerProvider(t *testing.T) {
+	cfg, err := config.Load(supabaseLookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attrs []slog.Attr
+	logger := slog.New(attrRecorder{Handler: slog.NewTextHandler(io.Discard, nil), attrs: &attrs})
+	if _, err := buildPollers(cfg, deps{logger: logger, requests: httpx.NewRequestsCounter()}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(attrs, func(a slog.Attr) bool { return a.Equal(slog.String("provider", "supabase")) }) {
+		t.Fatalf("supabase logger attributes = %v, want provider=supabase", attrs)
+	}
+}
+
 func TestMain(m *testing.M) {
 	httpx.SetDialGuard(httpx.LoopbackOnly)
 	os.Exit(m.Run())

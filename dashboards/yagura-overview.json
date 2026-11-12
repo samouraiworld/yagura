@@ -623,6 +623,299 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 15,
+      "title": "Supabase",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 16,
+      "title": "Supabase projects",
+      "type": "table",
+      "datasource": "${datasource}",
+      "description": "Every Supabase project the token can see, with its organization, region and current status. A paused project shows INACTIVE. An exporter instance whose last poll failed is left out.",
+      "gridPos": {
+        "x": 0,
+        "y": 33,
+        "w": 14,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "${datasource}",
+          "expr": "max by (project_ref, project_name, organization_slug, region) (yagura_supabase_project_info and on (job, instance) (yagura_collector_up{collector=\"supabase_projects\"} == 1))",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "datasource": "${datasource}",
+          "expr": "max by (project_ref, status) (yagura_supabase_project_status == 1 and on (job, instance) (yagura_collector_up{collector=\"supabase_projects\"} == 1))",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "includeByName": {
+              "project_name": true,
+              "project_ref": true,
+              "organization_slug": true,
+              "region": true,
+              "status": true
+            },
+            "indexByName": {
+              "project_name": 0,
+              "project_ref": 1,
+              "organization_slug": 2,
+              "region": 3,
+              "status": 4
+            },
+            "renameByName": {
+              "project_name": "Project",
+              "project_ref": "Ref",
+              "organization_slug": "Organization",
+              "region": "Region",
+              "status": "Status"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Project",
+                "desc": false
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "ACTIVE_HEALTHY": {
+                        "color": "green",
+                        "index": 0
+                      },
+                      "ACTIVE_UNHEALTHY": {
+                        "color": "red",
+                        "index": 1
+                      },
+                      "INACTIVE": {
+                        "color": "text",
+                        "index": 2
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": ".*",
+                      "result": {
+                        "color": "orange",
+                        "index": 3
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 17,
+      "title": "Supabase disk usage",
+      "type": "bargauge",
+      "datasource": "${datasource}",
+      "description": "Used share of the disk of each active project (used / size). Orange from 70%, red from 80%, where YaguraSupabaseDiskAlmostFull fires after 15 minutes. A project whose name is not known yet shows only its ref, in parentheses. An exporter instance whose last poll failed is left out.",
+      "gridPos": {
+        "x": 14,
+        "y": 33,
+        "w": 10,
+        "h": 8
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "${datasource}",
+          "expr": "max by (project_ref) (yagura_supabase_disk_used_bytes and on (job, instance) (yagura_collector_up{collector=\"supabase_disk\"} == 1)) / (max by (project_ref) (yagura_supabase_disk_size_bytes) > 0) * on (project_ref) group_left (project_name) topk by (project_ref) (1, yagura_supabase_project_info) or max by (project_ref) (yagura_supabase_disk_used_bytes and on (job, instance) (yagura_collector_up{collector=\"supabase_disk\"} == 1)) / (max by (project_ref) (yagura_supabase_disk_size_bytes) > 0) unless on (project_ref) yagura_supabase_project_info",
+          "legendFormat": "{{project_name}} ({{project_ref}})",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 0,
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.7
+              },
+              {
+                "color": "red",
+                "value": 0.8
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 18,
+      "title": "Supabase service health",
+      "type": "table",
+      "datasource": "${datasource}",
+      "description": "Health of each requested service of every active Supabase project. When the health call of a project fails while others answer, every service of that project shows Unhealthy; when every call fails, the poll fails and the exporter instance is left out (see Exporter health). With several exporter replicas, the worst value is shown.",
+      "gridPos": {
+        "x": 0,
+        "y": 41,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "${datasource}",
+          "expr": "label_replace(label_join(min by (project_ref, service) (yagura_supabase_service_healthy and on (job, instance) (yagura_collector_up{collector=\"supabase_projects\"} == 1)) * on (project_ref) group_left (project_name) topk by (project_ref) (1, yagura_supabase_project_info), \"project\", \" (\", \"project_name\", \"project_ref\"), \"project\", \"$1)\", \"project\", \"(.*)\")",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "groupingToMatrix",
+          "options": {
+            "rowField": "project",
+            "columnField": "service",
+            "valueField": "Value"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "renameByName": {
+              "project\\service": "Project"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Project",
+                "desc": false
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "cellOptions": {
+              "type": "color-background"
+            }
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Unhealthy",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "Healthy",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ]
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Project"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }

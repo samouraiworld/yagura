@@ -196,3 +196,151 @@ tests:
             exp_annotations:
               summary: "Scaleway month-to-date cost is over budget (EUR, demo-1.example.com:10100)"
               description: "Scaleway consumption since the 1st of the month is 110.25 EUR, above the budget set in this alert rule."
+
+  - interval: 1m
+    input_series:
+      # aaaa…: status ACTIVE_UNHEALTHY: fires after the 5m "for", once for
+      # the project; its unhealthy service raises no alert of its own.
+      - series: 'yagura_supabase_project_status{project_ref="aaaaaaaaaaaaaaaaaaaa", status="ACTIVE_UNHEALTHY"}'
+        values: '1x20'
+      - series: 'yagura_supabase_project_status{project_ref="aaaaaaaaaaaaaaaaaaaa", status="ACTIVE_HEALTHY"}'
+        values: '0x20'
+      - series: 'yagura_supabase_service_healthy{project_ref="aaaaaaaaaaaaaaaaaaaa", service="db"}'
+        values: '0x20'
+      # bbbb…: status ACTIVE_HEALTHY, but rest is not healthy: fires for rest
+      # only.
+      - series: 'yagura_supabase_project_status{project_ref="bbbbbbbbbbbbbbbbbbbb", status="ACTIVE_UNHEALTHY"}'
+        values: '0x20'
+      - series: 'yagura_supabase_project_status{project_ref="bbbbbbbbbbbbbbbbbbbb", status="ACTIVE_HEALTHY"}'
+        values: '1x20'
+      - series: 'yagura_supabase_service_healthy{project_ref="bbbbbbbbbbbbbbbbbbbb", service="rest"}'
+        values: '0x20'
+      - series: 'yagura_supabase_service_healthy{project_ref="bbbbbbbbbbbbbbbbbbbb", service="auth"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: YaguraSupabaseProjectUnhealthy
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: YaguraSupabaseProjectUnhealthy
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              project_ref: aaaaaaaaaaaaaaaaaaaa
+              status: ACTIVE_UNHEALTHY
+            exp_annotations:
+              summary: "Supabase project aaaaaaaaaaaaaaaaaaaa is unhealthy"
+              description: "Supabase project aaaaaaaaaaaaaaaaaaaa has reported the status ACTIVE_UNHEALTHY for 5 minutes."
+          - exp_labels:
+              severity: critical
+              project_ref: bbbbbbbbbbbbbbbbbbbb
+              service: rest
+            exp_annotations:
+              summary: "Supabase project bbbbbbbbbbbbbbbbbbbb is unhealthy"
+              description: "Service rest of Supabase project bbbbbbbbbbbbbbbbbbbb has not been healthy for 5 minutes, or its health check keeps failing."
+
+  - interval: 1m
+    input_series:
+      # Failed statuses fire; a paused project (INACTIVE) does not.
+      - series: 'yagura_supabase_project_status{project_ref="aaaaaaaaaaaaaaaaaaaa", status="INIT_FAILED"}'
+        values: '1x20'
+      - series: 'yagura_supabase_project_status{project_ref="aaaaaaaaaaaaaaaaaaaa", status="INACTIVE"}'
+        values: '0x20'
+      - series: 'yagura_supabase_project_status{project_ref="bbbbbbbbbbbbbbbbbbbb", status="RESTORE_FAILED"}'
+        values: '0x20'
+      - series: 'yagura_supabase_project_status{project_ref="bbbbbbbbbbbbbbbbbbbb", status="INACTIVE"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: YaguraSupabaseProjectUnhealthy
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              project_ref: aaaaaaaaaaaaaaaaaaaa
+              status: INIT_FAILED
+            exp_annotations:
+              summary: "Supabase project aaaaaaaaaaaaaaaaaaaa is unhealthy"
+              description: "Supabase project aaaaaaaaaaaaaaaaaaaa has reported the status INIT_FAILED for 5 minutes."
+
+  - interval: 1m
+    input_series:
+      - series: 'yagura_supabase_project_status{project_ref="aaaaaaaaaaaaaaaaaaaa", status="RESTORE_FAILED"}'
+        values: '1x20'
+      - series: 'yagura_supabase_project_status{project_ref="bbbbbbbbbbbbbbbbbbbb", status="PAUSE_FAILED"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: YaguraSupabaseProjectUnhealthy
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              project_ref: aaaaaaaaaaaaaaaaaaaa
+              status: RESTORE_FAILED
+            exp_annotations:
+              summary: "Supabase project aaaaaaaaaaaaaaaaaaaa is unhealthy"
+              description: "Supabase project aaaaaaaaaaaaaaaaaaaa has reported the status RESTORE_FAILED for 5 minutes."
+          - exp_labels:
+              severity: critical
+              project_ref: bbbbbbbbbbbbbbbbbbbb
+              status: PAUSE_FAILED
+            exp_annotations:
+              summary: "Supabase project bbbbbbbbbbbbbbbbbbbb is unhealthy"
+              description: "Supabase project bbbbbbbbbbbbbbbbbbbb has reported the status PAUSE_FAILED for 5 minutes."
+
+  - interval: 1m
+    input_series:
+      # aaaa…: 79% used: never fires.
+      - series: 'yagura_supabase_disk_size_bytes{project_ref="aaaaaaaaaaaaaaaaaaaa"}'
+        values: '1000x30'
+      - series: 'yagura_supabase_disk_used_bytes{project_ref="aaaaaaaaaaaaaaaaaaaa"}'
+        values: '790x30'
+      # bbbb…: 85% used: fires after the 15m "for".
+      - series: 'yagura_supabase_disk_size_bytes{project_ref="bbbbbbbbbbbbbbbbbbbb"}'
+        values: '1000x30'
+      - series: 'yagura_supabase_disk_used_bytes{project_ref="bbbbbbbbbbbbbbbbbbbb"}'
+        values: '850x30'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: YaguraSupabaseDiskAlmostFull
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: YaguraSupabaseDiskAlmostFull
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              project_ref: bbbbbbbbbbbbbbbbbbbb
+            exp_annotations:
+              summary: "Supabase project bbbbbbbbbbbbbbbbbbbb disk is almost full"
+              description: "The disk of Supabase project bbbbbbbbbbbbbbbbbbbb is 85% full, above 80% for 15 minutes."
+
+  - interval: 1m
+    input_series:
+      # A disk of size 0 never fires (no division by zero).
+      - series: 'yagura_supabase_disk_size_bytes{project_ref="aaaaaaaaaaaaaaaaaaaa"}'
+        values: '0x30'
+      - series: 'yagura_supabase_disk_used_bytes{project_ref="aaaaaaaaaaaaaaaaaaaa"}'
+        values: '850x30'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: YaguraSupabaseDiskAlmostFull
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      # A project whose status stays UNKNOWN fires too.
+      - series: 'yagura_supabase_project_status{project_ref="aaaaaaaaaaaaaaaaaaaa", status="UNKNOWN"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: YaguraSupabaseProjectUnhealthy
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: YaguraSupabaseProjectUnhealthy
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              project_ref: aaaaaaaaaaaaaaaaaaaa
+              status: UNKNOWN
+            exp_annotations:
+              summary: "Supabase project aaaaaaaaaaaaaaaaaaaa is unhealthy"
+              description: "Supabase project aaaaaaaaaaaaaaaaaaaa has reported the status UNKNOWN for 5 minutes."

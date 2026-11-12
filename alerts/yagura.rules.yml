@@ -75,3 +75,31 @@ groups:
         annotations:
           summary: "Scaleway month-to-date cost is over budget ({{ $labels.currency }}, {{ $labels.instance }})"
           description: "Scaleway consumption since the 1st of the month is {{ printf \"%.2f\" $value }} {{ $labels.currency }}, above the budget set in this alert rule."
+
+      - alert: YaguraSupabaseProjectUnhealthy
+        # A project in a failed or UNKNOWN status, or one service of an active project
+        # that is not healthy; the services of an ACTIVE_UNHEALTHY project do
+        # not raise their own alerts. A failed health call reports every
+        # requested service of that project as unhealthy while the health
+        # call of another project succeeds; when every call fails, the poll
+        # fails and keeps the last values, and YaguraCollectorFailing fires
+        # instead.
+        expr: >-
+          yagura_supabase_project_status{status=~"ACTIVE_UNHEALTHY|INIT_FAILED|RESTORE_FAILED|PAUSE_FAILED|UNKNOWN"} == 1
+          or (yagura_supabase_service_healthy == 0 unless on (project_ref) yagura_supabase_project_status{status="ACTIVE_UNHEALTHY"} == 1)
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Supabase project {{ $labels.project_ref }} is unhealthy"
+          description: "{{ if $labels.status }}Supabase project {{ $labels.project_ref }} has reported the status {{ $labels.status }} for 5 minutes.{{ else }}Service {{ $labels.service }} of Supabase project {{ $labels.project_ref }} has not been healthy for 5 minutes, or its health check keeps failing.{{ end }}"
+
+      - alert: YaguraSupabaseDiskAlmostFull
+        # The size check keeps a zero-sized disk from dividing by zero.
+        expr: yagura_supabase_disk_used_bytes / yagura_supabase_disk_size_bytes > 0.8 and yagura_supabase_disk_size_bytes > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Supabase project {{ $labels.project_ref }} disk is almost full"
+          description: "The disk of Supabase project {{ $labels.project_ref }} is {{ $value | humanizePercentage }} full, above 80% for 15 minutes."
