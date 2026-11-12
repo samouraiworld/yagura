@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/samouraiworld/yagura/internal/gandi"
+	"github.com/samouraiworld/yagura/internal/netlify"
 	"github.com/samouraiworld/yagura/internal/poller"
 	"github.com/samouraiworld/yagura/internal/scaleway"
 	"github.com/samouraiworld/yagura/internal/statuspage"
@@ -23,6 +24,7 @@ func MetricNames() []string {
 	names = append(names, gandi.MetricNames...)
 	names = append(names, scaleway.MetricNames...)
 	names = append(names, supabase.MetricNames...)
+	names = append(names, netlify.MetricNames...)
 	slices.Sort(names)
 	return slices.Compact(names)
 }

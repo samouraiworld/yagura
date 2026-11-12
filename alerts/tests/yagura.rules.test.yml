@@ -344,3 +344,63 @@ tests:
             exp_annotations:
               summary: "Supabase project aaaaaaaaaaaaaaaaaaaa is unhealthy"
               description: "Supabase project aaaaaaaaaaaaaaaaaaaa has reported the status UNKNOWN for 5 minutes."
+
+  - interval: 1m
+    input_series:
+      # demo-docs fails, then a new deploy succeeds; demo-site never fails.
+      - series: 'yagura_netlify_last_deploy_failed{site="demo-site"}'
+        values: '0x40'
+      - series: 'yagura_netlify_last_deploy_failed{site="demo-docs"}'
+        values: '1x10 0x30'
+    alert_rule_test:
+      # Fires at once (for: 0m).
+      - eval_time: 0m
+        alertname: YaguraNetlifyLastDeployFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              site: demo-docs
+            exp_annotations:
+              summary: "Netlify site demo-docs: last production deploy failed"
+              description: "The last known production deploy of Netlify site demo-docs is in the error state. Netlify does not publish a failed deploy: the site keeps serving its last published deploy, if it has one."
+      # An explicit 0 resolves it at once.
+      - eval_time: 11m
+        alertname: YaguraNetlifyLastDeployFailed
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      # One failed deploy call omits the site's series for one poll: the
+      # alert keeps firing through the gap.
+      - series: 'yagura_netlify_last_deploy_failed{site="demo-docs"}'
+        values: '1x4 stale _x4 1x10'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: YaguraNetlifyLastDeployFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              site: demo-docs
+            exp_annotations:
+              summary: "Netlify site demo-docs: last production deploy failed"
+              description: "The last known production deploy of Netlify site demo-docs is in the error state. Netlify does not publish a failed deploy: the site keeps serving its last published deploy, if it has one."
+
+  - interval: 1m
+    input_series:
+      # The deploy call keeps failing: the last known state holds for 30
+      # minutes, when YaguraCollectorPartialFailure fires instead.
+      - series: 'yagura_netlify_last_deploy_failed{site="demo-docs"}'
+        values: '1x4 stale'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: YaguraNetlifyLastDeployFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              site: demo-docs
+            exp_annotations:
+              summary: "Netlify site demo-docs: last production deploy failed"
+              description: "The last known production deploy of Netlify site demo-docs is in the error state. Netlify does not publish a failed deploy: the site keeps serving its last published deploy, if it has one."
+      - eval_time: 40m
+        alertname: YaguraNetlifyLastDeployFailed
+        exp_alerts: []

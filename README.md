@@ -82,6 +82,12 @@ Go runtime and process metrics are also exposed.
 | `yagura_supabase_disk_size_bytes` | gauge | `project_ref` | Size of the project's disk; active projects only |
 | `yagura_supabase_disk_used_bytes` | gauge | `project_ref` | Used space on the project's disk; active projects only |
 | `yagura_supabase_disk_available_bytes` | gauge | `project_ref` | Available space on the project's disk; active projects only |
+| `yagura_netlify_last_deploy_info` | gauge | `site`, `account`, `state` | Always 1; carries the raw state of the site's last production deploy (`ready`, `error`, `building`, …) and its team slug; omitted for a site with no production deploy (omitted with an item error for a deploy without a state) |
+| `yagura_netlify_last_deploy_failed` | gauge | `site` | 1 if the site's last production deploy is in the `error` state, else 0; omitted for a site with no production deploy (omitted with an item error for a deploy without a state) |
+| `yagura_netlify_last_deploy_created_timestamp_seconds` | gauge | `site` | Unix time at which the site's last production deploy was created; omitted for a site with no production deploy (omitted with an item error if the time is missing or invalid) |
+| `yagura_netlify_build_minutes_used` | gauge | `account` | Build minutes the team has used in the current billing period (omitted with an item error if the API sends none) |
+| `yagura_netlify_build_minutes_included` | gauge | `account` | Build minutes included in the team's plan (omitted if the API sends no usable number) |
+| `yagura_netlify_build_period_end_timestamp_seconds` | gauge | `account` | Unix time at which the team's current build billing period ends (omitted with an item error if missing or invalid) |
 | `yagura_api_requests_total` | counter | `provider`, `code` | Outbound requests (HTTP status, `invalid` for a status outside 100-599, or `error` for network failures) |
 | `yagura_build_info` | gauge | `version`, `revision`, `goversion` | Build metadata, always 1 |
 
@@ -498,6 +504,80 @@ prometheus.scrape "supabase" {
 Redirects are turned off so the key is never sent to another host. Add one
 target per project, each with its own secret API key (one scrape job or
 component per project).
+
+### Netlify
+
+Watches the last production deploy of every Netlify site and the build
+minutes of every team through the Netlify API (`https://api.netlify.com`). It
+is enabled when `YAGURA_NETLIFY_TOKEN` (or `YAGURA_NETLIFY_TOKEN_FILE`) is set
+and runs two pollers, which share one rate limiter (4 requests per second;
+Netlify allows 500 per minute):
+
+- `netlify_deploys` lists every site the token's user can see, 100 per page,
+  then asks each site for its latest production deploy. A site that has never
+  had a production deploy exports no deploy series.
+- `netlify_builds` lists the teams of the token's user (called accounts in the
+  Netlify API), then reads the build minutes of each team for the current
+  billing period.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `YAGURA_NETLIFY_TOKEN` (or `_FILE`) | empty | Personal access token; enables the collector |
+| `YAGURA_NETLIFY_DEPLOYS_INTERVAL` | `5m` | Sites and last deploy poll interval (minimum 30s) |
+| `YAGURA_NETLIFY_BUILDS_INTERVAL` | `15m` | Build minutes poll interval (minimum 30s) |
+
+Metrics are listed in the [metric reference](#metric-reference). `site` is the
+site name and `account` the team slug. `state` is the deploy state exactly as
+Netlify reports it; `yagura_netlify_last_deploy_failed` is 1 only for `error`.
+When the call of one site or team fails while others answer, yagura logs it,
+counts it in `yagura_collector_last_item_errors` and omits the series of that
+site or team. When every call fails, the poll fails instead: yagura keeps
+serving the last values and `YaguraCollectorFailing` fires after 15 minutes. A
+site or team that disappears between the list and the call (HTTP 404) is left
+out without an error. A 401 or 403 fails the whole poll;
+`yagura_api_requests_total` then shows code `401` for `netlify` when the token
+has expired or been revoked, and `403` when its user may not read a resource.
+
+**Token setup.** Netlify personal access tokens have **no scopes**. A token
+acts with the full rights of the user who created it, on every team that user
+belongs to: for a Developer or an Owner, that includes deploying and changing
+site settings and environment variables, and for an Owner, managing the team.
+yagura sends only `GET` requests and a
+guard enforces this, but anyone who obtains the token gets all of those
+rights. To limit the risk:
+
+- where your Netlify plan allows it, create the token as a dedicated team
+  member with the least privileged role that can still see the sites, not as
+  an Owner, and add that member only to the teams yagura should watch: yagura
+  reads every team the user belongs to. Netlify documents no read-only role.
+  **Not confirmed:** which role is the least one that can read the sites,
+  deploys and build minutes, and whether a member limited to some projects
+  sees only those. If the role cannot read one of them, the API answers 403
+  and that poller fails;
+- create the token under User settings → Applications → Personal access
+  tokens → New access token, and give it an expiration date; the
+  `YaguraCollectorFailing` alert tells you when it has expired;
+- leave "Allow access to my SAML-based Netlify team" unticked unless the
+  watched team uses SAML single sign-on;
+- store the token in a file (`YAGURA_NETLIFY_TOKEN_FILE`) readable only by
+  yagura, rather than inline in `.env`, and never in a configuration file you
+  commit. The container image runs as UID 65532: with a Docker secret (see
+  `docker-compose.yml`), give the file to that user and keep it private, for
+  example `sudo chown 65532 secrets/netlify_token` then
+  `sudo chmod 0400 secrets/netlify_token`; do not make it world-readable.
+
+With this collector on, `/metrics` shows the name of every site and the slug
+of every team the token can see. Turn on the web config (TLS, basic auth) or
+keep the port reachable only by your Prometheus server.
+
+The `YaguraNetlifyLastDeployFailed` alert fires as soon as the last production
+deploy of a site is in the `error` state, and resolves as soon as the site's
+latest production deploy is in any other state. When the deploy call of the
+site fails, its series is omitted and the alert keeps the last known state for
+up to 30 minutes; a call that keeps failing raises
+`YaguraCollectorPartialFailure` after 30 minutes. **Not confirmed:**
+Netlify has reported canceled builds, including builds skipped by an ignore
+command, in the `error` state; if it still does, the alert fires for them too.
 
 ## Target scale
 

@@ -103,3 +103,20 @@ groups:
         annotations:
           summary: "Supabase project {{ $labels.project_ref }} disk is almost full"
           description: "The disk of Supabase project {{ $labels.project_ref }} is {{ $value | humanizePercentage }} full, above 80% for 15 minutes."
+
+      - alert: YaguraNetlifyLastDeployFailed
+        # Fires at once: a failed production deploy needs no confirmation. It
+        # resolves as soon as the latest production deploy of the site is no
+        # longer in the error state. A failed deploy call omits the site's
+        # series: the last known value then holds for up to 30 minutes, so
+        # one failed call does not resolve the alert; a call that keeps
+        # failing raises YaguraCollectorPartialFailure after 30 minutes.
+        expr: >-
+          yagura_netlify_last_deploy_failed == 1
+          or (last_over_time(yagura_netlify_last_deploy_failed[30m]) == 1 unless yagura_netlify_last_deploy_failed)
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Netlify site {{ $labels.site }}: last production deploy failed"
+          description: "The last known production deploy of Netlify site {{ $labels.site }} is in the error state. Netlify does not publish a failed deploy: the site keeps serving its last published deploy, if it has one."
