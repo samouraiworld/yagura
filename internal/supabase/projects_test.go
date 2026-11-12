@@ -175,6 +175,34 @@ func TestProjectsHealthCallFails(t *testing.T) {
 	}
 }
 
+// TestProjectsHealthFailureLogsCause checks that the warning keeps the cause:
+// with the ref and the path, the error text outgrows the cap on remote values.
+func TestProjectsHealthFailureLogsCause(t *testing.T) {
+	for name, tc := range map[string]struct {
+		route testkit.Route
+		cause string
+	}{
+		"server error": {testkit.Route{Status: 500, Body: `{"message":"demo failure"}`}, "HTTP 500"},
+		"null body":    {testkit.Route{Body: `null`}, "response is not an array"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var logs bytes.Buffer
+			p, _ := newPoller(t, map[string]testkit.Route{
+				"/v1/projects": {Body: twoActiveProjects},
+				healthPathA:    tc.route,
+				healthPathB:    {File: "testdata/health_ok.json"},
+			}, &logs)
+			if _, err := poll(t, p); err != nil {
+				t.Fatal(err)
+			}
+			out := logs.String()
+			if !strings.Contains(out, tc.cause) || strings.Contains(out, "(truncated)") {
+				t.Errorf("warning lacks the cause %q: %s", tc.cause, out)
+			}
+		})
+	}
+}
+
 func TestProjectsHealthGone(t *testing.T) {
 	var logs bytes.Buffer
 	p, _ := newPoller(t, map[string]testkit.Route{

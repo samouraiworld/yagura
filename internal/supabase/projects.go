@@ -65,7 +65,7 @@ func logItemError(ctx context.Context, logger *slog.Logger, what string, ref str
 		logger.Debug("supabase project gone; "+what+" omitted", "project_ref", ref)
 	case httpx.IsAuthError(err), errors.Is(err, poller.ErrItemSkipped), ctx.Err() != nil:
 	default:
-		logger.Warn("supabase "+what+" call failed", "project_ref", ref, "error", capped(err.Error()))
+		logger.Warn("supabase "+what+" call failed", "project_ref", ref, "error", cappedError(err))
 	}
 }
 
@@ -235,6 +235,20 @@ func (p *projectsPoller) health(ctx context.Context, pr project) ([]prometheus.M
 
 // maxLogValue caps remote strings written to the logs.
 const maxLogValue = 64
+
+// maxLogError caps error text written to the logs. It is larger than
+// maxLogValue so the cause survives: httpx errors carry only the method, path
+// and status (never query or headers) and the refs in the path are validated.
+const maxLogError = 256
+
+// cappedError returns at most maxLogError bytes of err's text, marking a cut.
+func cappedError(err error) string {
+	s := err.Error()
+	if len(s) <= maxLogError {
+		return s
+	}
+	return s[:maxLogError] + "...(truncated)"
+}
 
 // capped returns at most maxLogValue bytes of s, marking a cut.
 func capped(s string) string {

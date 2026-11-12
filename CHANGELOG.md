@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Supabase: the warning logged when the health or disk call of one project fails now keeps the cause (HTTP status or decoding problem) instead of cutting the error text at 64 bytes.
+
 ## [0.3.0] - 2026-11-11
 
 ### Added
