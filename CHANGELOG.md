@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Gandi renewal prices: the `gandi_prices` poller exports the one-year renewal price of every domain, excluding taxes (`yagura_gandi_domain_renewal_price`), with one request a day for every distinct TLD; configured with `YAGURA_GANDI_PRICES_ENABLED` and `YAGURA_GANDI_PRICES_INTERVAL`.
+- "Costs" dashboard row: monthly bars over the last year for the total of all services (Scaleway measured plus one twelfth of the Gandi renewal estimate for autorenew domains) and for Scaleway alone, against an example budget; the Gandi renewal estimate; Gandi renewals over the next 12 months by month; a note that Netlify and Supabase expose no costs. The "Domain expiry" table shows each domain's renewal price.
+- `YaguraTotalMonthlyCostOverBudget` alert: Scaleway month to date plus one twelfth of the Gandi renewal estimate, per yagura instance and currency, over an example budget.
+
+### Fixed
+
+- Dashboard: the "Scaleway month to date by project" chart gives eight common categories a fixed colour of their own (other categories are grey) and no longer clips long project names; the "Domain expiry" table lists its columns by name, so extra scrape labels no longer show up.
+- README: the Scaleway amount is confirmed to exclude VAT.
+
 ## [0.4.0] - 2026-11-12
 
 ### Added
