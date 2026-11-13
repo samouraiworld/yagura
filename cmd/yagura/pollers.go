@@ -50,6 +50,9 @@ func buildPollers(cfg *config.Config, d deps) ([]poller.Poller, error) {
 			gandi.NewDomainsPoller(client, g.SharingID, g.DomainsInterval, logger),
 			gandi.NewBillingPoller(client, g.SharingID, g.BillingInterval, logger),
 		)
+		if g.PricesEnabled {
+			pollers = append(pollers, gandi.NewPricesPoller(client, g.SharingID, g.PricesInterval, logger))
+		}
 	}
 	if s := cfg.Scaleway; s != nil {
 		client := httpx.New(httpx.Options{
