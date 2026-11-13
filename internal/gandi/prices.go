@@ -22,8 +22,8 @@ import (
 const (
 	pricesPath = "/v5/billing/price/domain"
 	// pricesBatch caps the TLDs asked in one price request, which keeps the
-	// query string short. The request asks for one process only, so a batch
-	// returns at most pricesBatch products, well under its per_page.
+	// query string short. Asking one process only, a batch should fit in one
+	// page; pages are still followed in case Gandi returns more products.
 	pricesBatch = 50
 )
 
@@ -74,9 +74,11 @@ func (p *pricesPoller) Poll(ctx context.Context) (poller.Result, error) {
 		return poller.Result{ItemErrors: itemErrors}, nil
 	}
 
-	tlds := make([]string, 0, len(domains))
+	seen := map[string]bool{}
+	var tlds []string
 	for _, d := range domains {
-		if t := domainTLD(d); t != "" && !slices.Contains(tlds, t) {
+		if t := domainTLD(d); t != "" && !seen[t] {
+			seen[t] = true
 			tlds = append(tlds, t)
 		}
 	}
@@ -115,29 +117,55 @@ func (p *pricesPoller) Poll(ctx context.Context) (poller.Result, error) {
 }
 
 // fetch asks the renewal prices of one batch of TLDs and returns the response
-// currency and the one-year price, excluding taxes, per TLD.
+// currency and the one-year price, excluding taxes, per TLD. It follows pages
+// like the domain listing: it stops at a page with fewer than pageSize
+// products or once the Total-Count header is reached.
 func (p *pricesPoller) fetch(ctx context.Context, tlds []string) (string, map[string]float64, error) {
-	q := url.Values{}
-	for _, t := range tlds {
-		q.Add("name", "."+t)
-	}
-	q.Set("processes", "renew")
-	q.Set("per_page", strconv.Itoa(pageSize))
-	if p.sharingID != "" {
-		q.Set("sharing_id", p.sharingID)
-	}
-	var list *priceList
-	if _, err := p.client.GetJSON(ctx, pricesPath, q, &list); err != nil {
-		return "", nil, fmt.Errorf("gandi prices: %w", err)
-	}
-	if list == nil {
-		return "", nil, errors.New("gandi prices: response is not an object")
-	}
-	// The value is not echoed: it becomes a label only once validated.
-	if !currencyPattern.MatchString(list.Currency) {
-		return "", nil, errors.New("gandi prices: response currency is not a three-letter code")
-	}
+	var currency string
 	out := map[string]float64{}
+	var read int
+	for page := 1; page <= httpx.MaxPages; page++ {
+		q := url.Values{}
+		for _, t := range tlds {
+			q.Add("name", "."+t)
+		}
+		q.Set("processes", "renew")
+		q.Set("per_page", strconv.Itoa(pageSize))
+		q.Set("page", strconv.Itoa(page))
+		if p.sharingID != "" {
+			q.Set("sharing_id", p.sharingID)
+		}
+		var list *priceList
+		hdr, err := p.client.GetJSON(ctx, pricesPath, q, &list)
+		if err != nil {
+			return "", nil, fmt.Errorf("gandi prices: page %d: %w", page, err)
+		}
+		if list == nil {
+			return "", nil, fmt.Errorf("gandi prices: page %d: response is not an object", page)
+		}
+		// The value is not echoed: it becomes a label only once validated.
+		if !currencyPattern.MatchString(list.Currency) {
+			return "", nil, errors.New("gandi prices: response currency is not a three-letter code")
+		}
+		if currency != "" && list.Currency != currency {
+			return "", nil, errors.New("gandi prices: responses use different currencies")
+		}
+		currency = list.Currency
+		collectPrices(list, out)
+		read += len(list.Products)
+		if len(list.Products) < pageSize {
+			return currency, out, nil
+		}
+		if total, err := strconv.Atoi(hdr.Get("Total-Count")); err == nil && total > 0 && read >= total {
+			return currency, out, nil
+		}
+	}
+	return "", nil, fmt.Errorf("gandi prices: more than %d pages", httpx.MaxPages)
+}
+
+// collectPrices adds to out the one-year price, excluding taxes, of every
+// renew product of list whose TLD has no price yet.
+func collectPrices(list *priceList, out map[string]float64) {
 	for _, prod := range list.Products {
 		if prod.Process != "renew" {
 			continue
@@ -156,7 +184,6 @@ func (p *pricesPoller) fetch(ctx context.Context, tlds []string) (string, map[st
 			}
 		}
 	}
-	return list.Currency, out, nil
 }
 
 // domainTLD returns the domain's TLD: the list's tld field when present, else

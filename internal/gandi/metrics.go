@@ -21,7 +21,7 @@ var (
 	prepaidThresholdDesc = prometheus.NewDesc(MetricNames[3],
 		"Prepaid balance below which Gandi sends a warning, in the currency of the label.", []string{"currency"}, nil)
 	renewalPriceDesc = prometheus.NewDesc(MetricNames[4],
-		"One-year renewal price of the domain, excluding taxes, at the organization's price grid, in the currency of the label.",
+		"Gandi catalog price of a one-year renewal for the domain's TLD, excluding taxes, at the organization's price grid, in the currency of the label.",
 		[]string{"domain", "currency"}, nil)
 )
 

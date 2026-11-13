@@ -20,7 +20,7 @@ import (
 
 const (
 	pricesListKey = "GET " + listPath + "?page=1&per_page=100"
-	pricesKey     = "GET /v5/billing/price/domain?name=.co.uk&name=.com&name=.net&per_page=100&processes=renew"
+	pricesKey     = "GET /v5/billing/price/domain?name=.co.uk&name=.com&name=.net&page=1&per_page=100&processes=renew"
 )
 
 func newPrices(t *testing.T, sharingID string, routes map[string]testkit.Route, logs *bytes.Buffer) (poller.Poller, *httptest.Server) {
@@ -75,10 +75,10 @@ func TestPricesPerDomain(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]priceSeries{
-		"example.com":   {11.5, "EUR"},
-		"demo-shop.com": {11.5, "EUR"},
-		"example.co.uk": {7.25, "EUR"},
-		"example.net":   {14, "EUR"},
+		"example.com":      {11.5, "EUR"},
+		"shop.example.com": {11.5, "EUR"},
+		"example.co.uk":    {7.25, "EUR"},
+		"example.net":      {14, "EUR"},
 	}
 	got := priceValues(t, res)
 	if fmt.Sprint(got) != fmt.Sprint(want) {
@@ -124,7 +124,7 @@ func TestPricesTLDWithoutRenewPrice(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := priceValues(t, res)
-	if len(got) != 2 || got["example.com"].value != 11.5 || got["demo-shop.com"].value != 11.5 {
+	if len(got) != 2 || got["example.com"].value != 11.5 || got["shop.example.com"].value != 11.5 {
 		t.Errorf("prices = %v, want the two .com domains only", got)
 	}
 	if res.ItemErrors != 2 {
@@ -248,8 +248,8 @@ func TestPricesBatches(t *testing.T) {
 	second.WriteString("]}")
 	p, _ := newPrices(t, "", map[string]testkit.Route{
 		pricesListKey: {Body: list.String()},
-		firstKey + "per_page=100&processes=renew":  {Body: first.String()},
-		secondKey + "per_page=100&processes=renew": {Body: second.String()},
+		firstKey + "page=1&per_page=100&processes=renew":  {Body: first.String()},
+		secondKey + "page=1&per_page=100&processes=renew": {Body: second.String()},
 	}, &bytes.Buffer{})
 	res, err := poll(t, p)
 	if err != nil {
@@ -258,5 +258,59 @@ func TestPricesBatches(t *testing.T) {
 	got := priceValues(t, res)
 	if len(got) != 60 || got["example.t00"].value != 1 || got["example.t59"].value != 60 {
 		t.Errorf("got %d series, t00=%v t59=%v", len(got), got["example.t00"], got["example.t59"])
+	}
+}
+
+// TestPricesPaginated checks that a full page of products is followed by the
+// next page, in case Gandi returns more products than the TLDs asked.
+func TestPricesPaginated(t *testing.T) {
+	var full strings.Builder
+	full.WriteString(`{"currency":"EUR","products":[`)
+	for i := range pageSize {
+		if i > 0 {
+			full.WriteString(",")
+		}
+		full.WriteString(`{"name":".com","process":"create","prices":[{"duration_unit":"y","min_duration":1,"max_duration":10,"price_before_taxes":99}]}`)
+	}
+	full.WriteString("]}")
+	base := "GET /v5/billing/price/domain?name=.co.uk&name=.com&name=.net&"
+	p, srv := newPrices(t, "", map[string]testkit.Route{
+		pricesListKey: {File: "testdata/prices_domains.json"},
+		base + "page=1&per_page=100&processes=renew": {Body: full.String()},
+		base + "page=2&per_page=100&processes=renew": {File: "testdata/prices_renew.json"},
+	}, &bytes.Buffer{})
+	res, err := poll(t, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := priceValues(t, res); len(got) != 4 || got["example.com"].value != 11.5 {
+		t.Errorf("prices = %v, want the four domains from page 2", got)
+	}
+	if n := testkit.Hits(srv, base+"page=2&per_page=100&processes=renew"); n != 1 {
+		t.Errorf("page 2 requests = %d, want 1", n)
+	}
+}
+
+func TestPricesCurrencyMismatchAcrossBatches(t *testing.T) {
+	var list strings.Builder
+	list.WriteString("[")
+	keys := [2]string{"GET /v5/billing/price/domain?", "GET /v5/billing/price/domain?"}
+	for i := range pricesBatch + 1 {
+		tld := fmt.Sprintf("t%02d", i)
+		if i > 0 {
+			list.WriteString(",")
+		}
+		fmt.Fprintf(&list, `{"fqdn":"example.%s","tld":"%s","autorenew":true,"dates":{"registry_ends_at":"2027-01-01T00:00:00Z"}}`, tld, tld)
+		keys[i/pricesBatch] += "name=." + tld + "&"
+	}
+	list.WriteString("]")
+	product := `{"name":".t00","process":"renew","prices":[{"duration_unit":"y","min_duration":1,"max_duration":1,"price_before_taxes":1}]}`
+	p, _ := newPrices(t, "", map[string]testkit.Route{
+		pricesListKey: {Body: list.String()},
+		keys[0] + "page=1&per_page=100&processes=renew": {Body: `{"currency":"EUR","products":[` + product + `]}`},
+		keys[1] + "page=1&per_page=100&processes=renew": {Body: `{"currency":"USD","products":[]}`},
+	}, &bytes.Buffer{})
+	if _, err := poll(t, p); err == nil || !strings.Contains(err.Error(), "currencies") {
+		t.Fatalf("want a currency mismatch error, got %v", err)
 	}
 }

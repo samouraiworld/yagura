@@ -6,7 +6,7 @@
     "dates": {"registry_ends_at": "2027-03-01T00:00:00Z"}
   },
   {
-    "fqdn": "demo-shop.com",
+    "fqdn": "shop.example.com",
     "tld": "com",
     "autorenew": false,
     "dates": {"registry_ends_at": "2027-05-01T00:00:00Z"}
