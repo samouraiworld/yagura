@@ -295,7 +295,7 @@
       "title": "Domain expiry",
       "type": "table",
       "datasource": "${datasource}",
-      "description": "Days until each Gandi domain registration ends, soonest first, and whether it renews automatically.",
+      "description": "Days until each Gandi domain registration ends, soonest first, whether it renews automatically, and its one-year renewal price excluding VAT.",
       "gridPos": {
         "x": 0,
         "y": 15,
@@ -316,6 +316,13 @@
           "expr": "yagura_gandi_domain_autorenew",
           "format": "table",
           "instant": true
+        },
+        {
+          "refId": "C",
+          "datasource": "${datasource}",
+          "expr": "max by (domain, currency) (yagura_gandi_domain_renewal_price)",
+          "format": "table",
+          "instant": true
         }
       ],
       "transformations": [
@@ -326,21 +333,27 @@
         {
           "id": "organize",
           "options": {
-            "excludeByName": {
-              "Time": true,
-              "instance": true,
-              "job": true,
-              "__name__": true
+            "excludeByName": {},
+            "includeByName": {
+              "domain": true,
+              "Value #A": true,
+              "Value #B": true,
+              "Value #C": true,
+              "currency": true
             },
             "indexByName": {
               "domain": 0,
               "Value #A": 1,
-              "Value #B": 2
+              "Value #B": 2,
+              "Value #C": 3,
+              "currency": 4
             },
             "renameByName": {
               "domain": "Domain",
               "Value #A": "Days left",
-              "Value #B": "Autorenew"
+              "Value #B": "Autorenew",
+              "Value #C": "Renewal price",
+              "currency": "Currency"
             }
           }
         },
@@ -433,6 +446,18 @@
                 ]
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Renewal price"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
           }
         ]
       }
@@ -517,14 +542,287 @@
       "panels": []
     },
     {
+      "id": 22,
+      "title": "About these costs",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 24,
+        "h": 3
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**All amounts exclude VAT.** Scaleway is measured by its billing API (month to date). Gandi is an estimate: the one-year renewal prices of the domains that renew automatically, divided by 12 in the monthly totals; Gandi actually charges each domain when it renews. Amounts in different currencies are never added together. **Netlify and Supabase costs are not shown: their APIs do not expose them.**"
+      }
+    },
+    {
+      "id": 23,
+      "title": "Monthly cost, all services",
+      "type": "barchart",
+      "datasource": "${datasource}",
+      "description": "Per calendar month: Scaleway (measured) plus the Gandi yearly renewal estimate divided by 12 (autorenew domains). Months before yagura first polled Gandi prices show Scaleway only. Netlify and Supabase are not included: their APIs do not expose costs. Excluding VAT. Amounts in different currencies are never added together. The red line and red bars mark the budget: 100 is an example, edit the thresholds to your budget. A bar is the highest value seen in that calendar month (UTC), so the current month is still in progress; this assumes the Scaleway poll interval stays at a few hours or less.",
+      "gridPos": {
+        "x": 0,
+        "y": 27,
+        "w": 12,
+        "h": 9
+      },
+      "timeFrom": "1y",
+      "interval": "1d",
+      "options": {
+        "orientation": "vertical",
+        "stacking": "none",
+        "showValue": "auto",
+        "barWidth": 0.8,
+        "groupWidth": 0.7,
+        "xField": "Month",
+        "xTickLabelRotation": -45,
+        "xTickLabelSpacing": 0,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "${datasource}",
+          "expr": "max_over_time((sum by (currency) (label_replace(sum by (currency) (max by (project_id, project_name, category, currency) (yagura_scaleway_consumption_amount and on (job, instance) (yagura_collector_up{collector=\"scaleway_consumption\"} == 1))), \"part\", \"scaleway\", \"\", \"\") or label_replace(sum by (currency) (max by (domain, currency) (yagura_gandi_domain_renewal_price) * on (domain) group_left () (max by (domain) (yagura_gandi_domain_autorenew) == 1)) / 12, \"part\", \"gandi\", \"\", \"\")))[1d:1h] offset -27h)",
+          "format": "table",
+          "range": true,
+          "instant": false,
+          "interval": "1d"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "formatTime",
+          "options": {
+            "timeField": "Time",
+            "outputFormat": "YYYY-MM",
+            "useTimezone": false
+          }
+        },
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "Time": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "currency": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "Value": {
+                "aggregations": [
+                  "max"
+                ],
+                "operation": "aggregate"
+              }
+            }
+          }
+        },
+        {
+          "id": "groupingToMatrix",
+          "options": {
+            "rowField": "Time",
+            "columnField": "currency",
+            "valueField": "Value (max)",
+            "emptyValue": "null"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {},
+            "renameByName": {
+              "Time\\currency": "Month"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#2a78d6",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 100
+              }
+            ]
+          },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 24,
+      "title": "Scaleway monthly cost",
+      "type": "barchart",
+      "datasource": "${datasource}",
+      "description": "Scaleway consumption per calendar month, all watched organizations together; replicas of the same exporter are counted once and an instance whose last poll failed is left out. Excluding VAT. Amounts in different currencies are never added together. The red line and red bars mark the budget: 100 is an example, edit the thresholds to your budget. A bar is the highest value seen in that calendar month (UTC), so the current month is still in progress; this assumes the Scaleway poll interval stays at a few hours or less.",
+      "gridPos": {
+        "x": 12,
+        "y": 27,
+        "w": 12,
+        "h": 9
+      },
+      "timeFrom": "1y",
+      "interval": "1d",
+      "options": {
+        "orientation": "vertical",
+        "stacking": "none",
+        "showValue": "auto",
+        "barWidth": 0.8,
+        "groupWidth": 0.7,
+        "xField": "Month",
+        "xTickLabelRotation": -45,
+        "xTickLabelSpacing": 0,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "${datasource}",
+          "expr": "max_over_time((sum by (currency) (max by (project_id, project_name, category, currency) (yagura_scaleway_consumption_amount and on (job, instance) (yagura_collector_up{collector=\"scaleway_consumption\"} == 1))))[1d:1h] offset -27h)",
+          "format": "table",
+          "range": true,
+          "instant": false,
+          "interval": "1d"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "formatTime",
+          "options": {
+            "timeField": "Time",
+            "outputFormat": "YYYY-MM",
+            "useTimezone": false
+          }
+        },
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "Time": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "currency": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "Value": {
+                "aggregations": [
+                  "max"
+                ],
+                "operation": "aggregate"
+              }
+            }
+          }
+        },
+        {
+          "id": "groupingToMatrix",
+          "options": {
+            "rowField": "Time",
+            "columnField": "currency",
+            "valueField": "Value (max)",
+            "emptyValue": "null"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {},
+            "renameByName": {
+              "Time\\currency": "Month"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#2a78d6",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 100
+              }
+            ]
+          },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
       "id": 13,
       "title": "Scaleway month to date by project",
       "type": "barchart",
       "datasource": "${datasource}",
-      "description": "Scaleway consumption since the 1st of the month, per project and currency, stacked by category. Resets on the 1st. A project shows as its name and the first 8 characters of its ID, or its full ID when it has no name; replicas of the same exporter are counted once, and an instance whose last poll failed is left out. VAT inclusion is not confirmed: see the README.",
+      "description": "Scaleway consumption since the 1st of the month, per project and currency, stacked by category. Resets on the 1st. A project shows as its name and the first 8 characters of its ID, or its full ID when it has no name; replicas of the same exporter are counted once, and an instance whose last poll failed is left out. Excluding VAT. Project names longer than 20 characters are shortened. Eight common categories have a fixed colour; any other category is grey (hover a bar to see its name).",
       "gridPos": {
         "x": 0,
-        "y": 24,
+        "y": 36,
         "w": 16,
         "h": 8
       },
@@ -548,7 +846,7 @@
         {
           "refId": "A",
           "datasource": "${datasource}",
-          "expr": "sum by (project, category, currency) (label_join(label_replace(label_replace(label_replace(label_replace(label_join(max by (project_id, project_name, category, currency) (yagura_scaleway_consumption_amount and on (job, instance) (yagura_collector_up{collector=\"scaleway_consumption\"} == 1)), \"name_id\", \";\", \"project_name\", \"project_id\"), \"project\", \"$1\", \"name_id\", \"(.+);\"), \"project\", \"$1 ($2)\", \"name_id\", \"(.+);(.{1,8}).*\"), \"project\", \"$1\", \"name_id\", \";(.+)\"), \"project\", \"(no project)\", \"name_id\", \";\"), \"project\", \" \", \"project\", \"currency\"))",
+          "expr": "sum by (project, category, currency) (label_join(label_replace(label_replace(label_replace(label_replace(label_replace(label_join(max by (project_id, project_name, category, currency) (yagura_scaleway_consumption_amount and on (job, instance) (yagura_collector_up{collector=\"scaleway_consumption\"} == 1)), \"name_id\", \";\", \"project_name\", \"project_id\"), \"project\", \"$1\", \"name_id\", \"(.+);\"), \"project\", \"$1 ($2)\", \"name_id\", \"(.+);(.{1,8}).*\"), \"project\", \"$1… ($2)\", \"name_id\", \"(.{20}).+;(.{1,8}).*\"), \"project\", \"$1\", \"name_id\", \";(.+)\"), \"project\", \"(no project)\", \"name_id\", \";\"), \"project\", \" \", \"project\", \"currency\"))",
           "format": "table",
           "instant": true
         }
@@ -569,14 +867,136 @@
           "unit": "none",
           "decimals": 2,
           "color": {
-            "mode": "palette-classic"
+            "mode": "fixed",
+            "fixedColor": "#8c8c8c"
           },
           "custom": {
             "fillOpacity": 80,
             "lineWidth": 1
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Compute"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#2a78d6"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "BareMetal"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#eb6834"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Object Storage"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#1baf7a"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Managed Databases"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#eda100"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Containers"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#e87ba4"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Serverless"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#008300"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Observability"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#6250d6"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Security and Identity"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#e34948"
+                }
+              }
+            ]
+          }
+        ]
       }
     },
     {
@@ -584,10 +1004,10 @@
       "title": "Scaleway month to date total",
       "type": "stat",
       "datasource": "${datasource}",
-      "description": "Scaleway consumption since the 1st of the month, per currency, all watched organizations together. Resets on the 1st. Replicas of the same exporter are counted once, and an instance whose last poll failed is left out.",
+      "description": "Scaleway consumption since the 1st of the month, per currency, all watched organizations together. Resets on the 1st. Replicas of the same exporter are counted once, and an instance whose last poll failed is left out. Excluding VAT.",
       "gridPos": {
         "x": 16,
-        "y": 24,
+        "y": 36,
         "w": 8,
         "h": 8
       },
@@ -625,13 +1045,222 @@
       }
     },
     {
+      "id": 25,
+      "title": "Gandi renewal estimate",
+      "type": "stat",
+      "datasource": "${datasource}",
+      "description": "Sum of the one-year renewal prices, excluding VAT, of the Gandi domains that renew automatically, at the organization's price grid; per year and divided by 12. An estimate: Gandi charges each domain when it renews, and promotions may differ.",
+      "gridPos": {
+        "x": 0,
+        "y": 44,
+        "w": 8,
+        "h": 8
+      },
+      "options": {
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "${datasource}",
+          "expr": "sum by (currency) (max by (domain, currency) (yagura_gandi_domain_renewal_price) * on (domain) group_left () (max by (domain) (yagura_gandi_domain_autorenew) == 1))",
+          "legendFormat": "Per year ({{currency}})",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "datasource": "${datasource}",
+          "expr": "sum by (currency) (max by (domain, currency) (yagura_gandi_domain_renewal_price) * on (domain) group_left () (max by (domain) (yagura_gandi_domain_autorenew) == 1)) / 12",
+          "legendFormat": "Per month ({{currency}})",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#2a78d6"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 26,
+      "title": "Gandi renewals, next 12 months",
+      "type": "barchart",
+      "datasource": "${datasource}",
+      "description": "Renewal prices, excluding VAT, of the Gandi domains that renew automatically, summed by the calendar month (UTC) in which their registration ends, over the next 365 days. An approximation: Gandi may charge an autorenewal a few days before that date.",
+      "gridPos": {
+        "x": 8,
+        "y": 44,
+        "w": 16,
+        "h": 8
+      },
+      "options": {
+        "orientation": "vertical",
+        "stacking": "none",
+        "showValue": "auto",
+        "barWidth": 0.8,
+        "groupWidth": 0.7,
+        "xField": "Month",
+        "xTickLabelRotation": -45,
+        "xTickLabelSpacing": 0,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "${datasource}",
+          "expr": "((max by (domain) (yagura_gandi_domain_expiry_timestamp_seconds) > time()) < time() + 365 * 86400) * 1000",
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "datasource": "${datasource}",
+          "expr": "max by (domain, currency) (yagura_gandi_domain_renewal_price) * on (domain) group_left () (max by (domain) (yagura_gandi_domain_autorenew) == 1)",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "domain",
+            "mode": "inner"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "includeByName": {
+              "Value #A": true,
+              "currency": true,
+              "Value #B": true
+            },
+            "indexByName": {},
+            "renameByName": {}
+          }
+        },
+        {
+          "id": "convertFieldType",
+          "options": {
+            "fields": {},
+            "conversions": [
+              {
+                "targetField": "Value #A",
+                "destinationType": "time"
+              }
+            ]
+          }
+        },
+        {
+          "id": "formatTime",
+          "options": {
+            "timeField": "Value #A",
+            "outputFormat": "YYYY-MM",
+            "useTimezone": false
+          }
+        },
+        {
+          "id": "groupBy",
+          "options": {
+            "fields": {
+              "Value #A": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "currency": {
+                "aggregations": [],
+                "operation": "groupby"
+              },
+              "Value #B": {
+                "aggregations": [
+                  "sum"
+                ],
+                "operation": "aggregate"
+              }
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Value #A",
+                "desc": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "groupingToMatrix",
+          "options": {
+            "rowField": "Value #A",
+            "columnField": "currency",
+            "valueField": "Value #B (sum)",
+            "emptyValue": "null"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {},
+            "renameByName": {
+              "Value #A\\currency": "Month"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#2a78d6"
+          },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
       "id": 15,
       "title": "Supabase",
       "type": "row",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 32,
+        "y": 52,
         "w": 24,
         "h": 1
       },
@@ -645,7 +1274,7 @@
       "description": "Every Supabase project the token can see, with its organization, region and current status. A paused project shows INACTIVE. An exporter instance whose last poll failed is left out.",
       "gridPos": {
         "x": 0,
-        "y": 33,
+        "y": 53,
         "w": 14,
         "h": 8
       },
@@ -770,7 +1399,7 @@
       "description": "Used share of the disk of each active project (used / size). Orange from 70%, red from 80%, where YaguraSupabaseDiskAlmostFull fires after 15 minutes. A project whose name is not known yet shows only its ref, in parentheses. An exporter instance whose last poll failed is left out.",
       "gridPos": {
         "x": 14,
-        "y": 33,
+        "y": 53,
         "w": 10,
         "h": 8
       },
@@ -830,7 +1459,7 @@
       "description": "Health of each requested service of every active Supabase project. When the health call of a project fails while others answer, every service of that project shows Unhealthy; when every call fails, the poll fails and the exporter instance is left out (see Exporter health). With several exporter replicas, the worst value is shown.",
       "gridPos": {
         "x": 0,
-        "y": 41,
+        "y": 61,
         "w": 24,
         "h": 8
       },
@@ -924,7 +1553,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 49,
+        "y": 69,
         "w": 24,
         "h": 1
       },
@@ -938,7 +1567,7 @@
       "description": "Last production deploy of every Netlify site the token can see: its state as Netlify reports it, whether it failed (state error, where YaguraNetlifyLastDeployFailed fires) and how long ago it was created. A site with no production deploy is not listed. An exporter instance whose last poll failed is left out.",
       "gridPos": {
         "x": 0,
-        "y": 50,
+        "y": 70,
         "w": 14,
         "h": 8
       },
@@ -1116,7 +1745,7 @@
       "description": "Build minutes used by each team in the current billing period, against the minutes included in its plan. Orange from 80% of the allowance, red once it is used up. A plan with no numeric allowance leaves Included and Used share empty. An exporter instance whose last poll failed is left out.",
       "gridPos": {
         "x": 14,
-        "y": 50,
+        "y": 70,
         "w": 10,
         "h": 8
       },
