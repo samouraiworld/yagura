@@ -39,6 +39,7 @@ func (p *domainsPoller) Interval() time.Duration { return p.interval }
 
 type domain struct {
 	FQDN      string `json:"fqdn"`
+	TLD       string `json:"tld"`
 	Autorenew *bool  `json:"autorenew"`
 	Dates     struct {
 		RegistryEndsAt string `json:"registry_ends_at"`
@@ -48,38 +49,14 @@ type domain struct {
 // Poll lists every domain page by page and builds one expiry and one
 // autorenew series per distinct fqdn.
 func (p *domainsPoller) Poll(ctx context.Context) (poller.Result, error) {
-	raw, err := p.list(ctx)
+	domains, itemErrors, err := listDomains(ctx, p.client, p.sharingID, p.logger)
 	if err != nil {
 		return poller.Result{}, err
 	}
 
-	// A listing that shifts between page requests can repeat a domain, and two
-	// series with the same labels would make the registry fail to gather: keep
-	// one entry per fqdn, the last one seen, in first-seen order.
-	var itemErrors int
-	var order []string
-	byName := map[string]domain{}
-	for _, item := range raw {
-		var d domain
-		if err := json.Unmarshal(item, &d); err != nil {
-			p.logger.Warn("gandi domain entry is not a domain object; skipped", "error", capped(err.Error()))
-			itemErrors++
-			continue
-		}
-		if d.FQDN == "" {
-			p.logger.Warn("gandi domain entry has no fqdn; skipped")
-			itemErrors++
-			continue
-		}
-		if _, seen := byName[d.FQDN]; !seen {
-			order = append(order, d.FQDN)
-		}
-		byName[d.FQDN] = d
-	}
-
 	var metrics []prometheus.Metric
-	for _, name := range order {
-		d := byName[name]
+	for _, d := range domains {
+		name := d.FQDN
 		end, err := time.Parse(time.RFC3339, d.Dates.RegistryEndsAt)
 		if err != nil {
 			p.logger.Warn("gandi domain has no valid registry_ends_at; skipped",
@@ -102,21 +79,56 @@ func (p *domainsPoller) Poll(ctx context.Context) (poller.Result, error) {
 	return poller.Result{Metrics: metrics, ItemErrors: itemErrors}, nil
 }
 
-// list returns the raw domain entries of every page. It stops at a page with
+// listDomains lists every domain and decodes the entries. Entries that are not
+// domain objects or have no fqdn are skipped with a warning and counted in
+// itemErrors. A listing that shifts between page requests can repeat a domain,
+// and two series with the same labels would make the registry fail to gather:
+// it keeps one entry per fqdn, the last one seen, in first-seen order.
+func listDomains(ctx context.Context, client *httpx.Client, sharingID string, logger *slog.Logger) (domains []domain, itemErrors int, err error) {
+	raw, err := listRaw(ctx, client, sharingID)
+	if err != nil {
+		return nil, 0, err
+	}
+	var order []string
+	byName := map[string]domain{}
+	for _, item := range raw {
+		var d domain
+		if err := json.Unmarshal(item, &d); err != nil {
+			logger.Warn("gandi domain entry is not a domain object; skipped", "error", capped(err.Error()))
+			itemErrors++
+			continue
+		}
+		if d.FQDN == "" {
+			logger.Warn("gandi domain entry has no fqdn; skipped")
+			itemErrors++
+			continue
+		}
+		if _, seen := byName[d.FQDN]; !seen {
+			order = append(order, d.FQDN)
+		}
+		byName[d.FQDN] = d
+	}
+	for _, name := range order {
+		domains = append(domains, byName[name])
+	}
+	return domains, itemErrors, nil
+}
+
+// listRaw returns the raw domain entries of every page. It stops at a page with
 // fewer than pageSize items, or once the raw count reaches the Total-Count
 // header (when present, numeric and positive); httpx.MaxPages pages without a stop is
 // an error.
-func (p *domainsPoller) list(ctx context.Context) ([]json.RawMessage, error) {
+func listRaw(ctx context.Context, client *httpx.Client, sharingID string) ([]json.RawMessage, error) {
 	var all []json.RawMessage
 	for page := 1; page <= httpx.MaxPages; page++ {
 		q := url.Values{}
 		q.Set("per_page", strconv.Itoa(pageSize))
 		q.Set("page", strconv.Itoa(page))
-		if p.sharingID != "" {
-			q.Set("sharing_id", p.sharingID)
+		if sharingID != "" {
+			q.Set("sharing_id", sharingID)
 		}
 		var items []json.RawMessage
-		hdr, err := p.client.GetJSON(ctx, domainsPath, q, &items)
+		hdr, err := client.GetJSON(ctx, domainsPath, q, &items)
 		if err != nil {
 			return nil, fmt.Errorf("gandi domains: page %d: %w", page, err)
 		}

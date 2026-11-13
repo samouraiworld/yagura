@@ -8,6 +8,7 @@ var MetricNames = []string{
 	"yagura_gandi_domain_autorenew",
 	"yagura_gandi_prepaid_balance",
 	"yagura_gandi_prepaid_warning_threshold",
+	"yagura_gandi_domain_renewal_price",
 }
 
 var (
@@ -19,8 +20,11 @@ var (
 		"Prepaid account balance, in the currency of the label.", []string{"currency"}, nil)
 	prepaidThresholdDesc = prometheus.NewDesc(MetricNames[3],
 		"Prepaid balance below which Gandi sends a warning, in the currency of the label.", []string{"currency"}, nil)
+	renewalPriceDesc = prometheus.NewDesc(MetricNames[4],
+		"One-year renewal price of the domain, excluding taxes, at the organization's price grid, in the currency of the label.",
+		[]string{"domain", "currency"}, nil)
 )
 
-func gauge(d *prometheus.Desc, v float64, label string) prometheus.Metric {
-	return prometheus.MustNewConstMetric(d, prometheus.GaugeValue, v, label)
+func gauge(d *prometheus.Desc, v float64, labels ...string) prometheus.Metric {
+	return prometheus.MustNewConstMetric(d, prometheus.GaugeValue, v, labels...)
 }

@@ -1,0 +1,25 @@
+[
+  {
+    "fqdn": "example.com",
+    "tld": "com",
+    "autorenew": true,
+    "dates": {"registry_ends_at": "2027-03-01T00:00:00Z"}
+  },
+  {
+    "fqdn": "demo-shop.com",
+    "tld": "com",
+    "autorenew": false,
+    "dates": {"registry_ends_at": "2027-05-01T00:00:00Z"}
+  },
+  {
+    "fqdn": "example.co.uk",
+    "autorenew": true,
+    "dates": {"registry_ends_at": "2027-07-01T00:00:00Z"}
+  },
+  {
+    "fqdn": "example.net",
+    "tld": "NET",
+    "autorenew": true,
+    "dates": {"registry_ends_at": "2027-09-01T00:00:00Z"}
+  }
+]

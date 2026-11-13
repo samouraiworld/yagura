@@ -80,6 +80,7 @@ Go runtime and process metrics are also exposed.
 | `yagura_statuspage_updated_timestamp_seconds` | gauge | `provider` | Unix time of the page's `updated_at` |
 | `yagura_gandi_domain_expiry_timestamp_seconds` | gauge | `domain` | Unix time at which the domain registration ends |
 | `yagura_gandi_domain_autorenew` | gauge | `domain` | 1 if the domain renews automatically, else 0 |
+| `yagura_gandi_domain_renewal_price` | gauge | `domain`, `currency` | One-year renewal price of the domain, excluding taxes, at the organization's price grid (omitted with an item error when Gandi gives no renewal price for its TLD) |
 | `yagura_gandi_prepaid_balance` | gauge | `currency` | Prepaid account balance (omitted if the account has no prepaid; omitted with an item error if missing) |
 | `yagura_gandi_prepaid_warning_threshold` | gauge | `currency` | Balance below which Gandi sends a warning (omitted if the account has no prepaid or no threshold set; omitted with an item error if it is not a number) |
 | `yagura_scaleway_consumption_amount` | gauge | `project_id`, `project_name`, `category`, `currency` | Consumption month to date, as reported by the Scaleway billing API; resets on the 1st |
