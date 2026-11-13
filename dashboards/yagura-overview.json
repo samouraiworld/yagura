@@ -610,7 +610,7 @@
           "options": {
             "timeField": "Time",
             "outputFormat": "YYYY-MM",
-            "useTimezone": false
+            "timezone": "utc"
           }
         },
         {
@@ -632,6 +632,18 @@
                 "operation": "aggregate"
               }
             }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Time",
+                "desc": false
+              }
+            ]
           }
         },
         {
@@ -739,7 +751,7 @@
           "options": {
             "timeField": "Time",
             "outputFormat": "YYYY-MM",
-            "useTimezone": false
+            "timezone": "utc"
           }
         },
         {
@@ -761,6 +773,18 @@
                 "operation": "aggregate"
               }
             }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Time",
+                "desc": false
+              }
+            ]
           }
         },
         {
@@ -1181,7 +1205,7 @@
           "options": {
             "timeField": "Value #A",
             "outputFormat": "YYYY-MM",
-            "useTimezone": false
+            "timezone": "utc"
           }
         },
         {
@@ -1896,5 +1920,6 @@
         ]
       }
     }
-  ]
+  ],
+  "timezone": "utc"
 }
