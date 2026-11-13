@@ -28,7 +28,8 @@ func TestGandiDefaults(t *testing.T) {
 	if g == nil {
 		t.Fatal("Gandi disabled with a token set")
 	}
-	if g.DomainsInterval != 6*time.Hour || g.BillingInterval != time.Hour || g.SharingID != "" {
+	if g.DomainsInterval != 6*time.Hour || g.BillingInterval != time.Hour || g.SharingID != "" ||
+		!g.PricesEnabled || g.PricesInterval != 24*time.Hour {
 		t.Fatalf("unexpected defaults: %+v", g)
 	}
 	if v, err := g.Token.Read(); err != nil || v != "test-token" {
@@ -42,13 +43,16 @@ func TestGandiOverrides(t *testing.T) {
 		"YAGURA_GANDI_SHARING_ID":       "00000000-0000-0000-0000-000000000001",
 		"YAGURA_GANDI_DOMAINS_INTERVAL": "12h",
 		"YAGURA_GANDI_BILLING_INTERVAL": "30m",
+		"YAGURA_GANDI_PRICES_ENABLED":   "false",
+		"YAGURA_GANDI_PRICES_INTERVAL":  "48h",
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	g := c.Gandi
 	if g.SharingID != "00000000-0000-0000-0000-000000000001" ||
-		g.DomainsInterval != 12*time.Hour || g.BillingInterval != 30*time.Minute {
+		g.DomainsInterval != 12*time.Hour || g.BillingInterval != 30*time.Minute ||
+		g.PricesEnabled || g.PricesInterval != 48*time.Hour {
 		t.Fatalf("unexpected config: %+v", g)
 	}
 }
@@ -77,6 +81,8 @@ func TestGandiValidation(t *testing.T) {
 		{"blank token file path", map[string]string{"YAGURA_GANDI_TOKEN_FILE": " \n"}, "YAGURA_GANDI_TOKEN_FILE: path is empty"},
 		{"domains interval", map[string]string{"YAGURA_GANDI_TOKEN": "s3cretpw", "YAGURA_GANDI_DOMAINS_INTERVAL": "10s"}, "YAGURA_GANDI_DOMAINS_INTERVAL"},
 		{"billing interval", map[string]string{"YAGURA_GANDI_TOKEN": "s3cretpw", "YAGURA_GANDI_BILLING_INTERVAL": "soon"}, "YAGURA_GANDI_BILLING_INTERVAL"},
+		{"prices interval", map[string]string{"YAGURA_GANDI_TOKEN": "s3cretpw", "YAGURA_GANDI_PRICES_INTERVAL": "1s"}, "YAGURA_GANDI_PRICES_INTERVAL"},
+		{"prices enabled", map[string]string{"YAGURA_GANDI_TOKEN": "s3cretpw", "YAGURA_GANDI_PRICES_ENABLED": "s3cretpw"}, "YAGURA_GANDI_PRICES_ENABLED"},
 	}
 	for _, tc := range bad {
 		t.Run(tc.name, func(t *testing.T) {
