@@ -315,3 +315,19 @@ func TestDomainsIgnoresNonPositiveTotalCount(t *testing.T) {
 		})
 	}
 }
+
+// TestDomainsIgnoreTLDType checks that a tld field of an unexpected type does
+// not drop the domain: only the gandi_prices poller reads it.
+func TestDomainsIgnoreTLDType(t *testing.T) {
+	p, _ := newPoller(t, "", map[string]testkit.Route{
+		page1Key: {Body: `[{"fqdn":"example.com","tld":5,"autorenew":true,"dates":{"registry_ends_at":"2027-01-01T00:00:00Z"}}]`},
+	}, &bytes.Buffer{})
+	res, err := poll(t, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := values(t, res)
+	if _, ok := v["yagura_gandi_domain_expiry_timestamp_seconds"]["example.com"]; !ok || res.ItemErrors != 0 {
+		t.Errorf("domain dropped: %v, item errors %d", v, res.ItemErrors)
+	}
+}

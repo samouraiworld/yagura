@@ -38,9 +38,11 @@ func (p *domainsPoller) Name() string            { return "gandi_domains" }
 func (p *domainsPoller) Interval() time.Duration { return p.interval }
 
 type domain struct {
-	FQDN      string `json:"fqdn"`
-	TLD       string `json:"tld"`
-	Autorenew *bool  `json:"autorenew"`
+	FQDN string `json:"fqdn"`
+	// TLD stays raw: only gandi_prices reads it (domainTLD), and a value of
+	// an unexpected type must not drop the domain from gandi_domains.
+	TLD       json.RawMessage `json:"tld"`
+	Autorenew *bool           `json:"autorenew"`
 	Dates     struct {
 		RegistryEndsAt string `json:"registry_ends_at"`
 	} `json:"dates"`

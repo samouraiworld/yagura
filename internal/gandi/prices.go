@@ -2,6 +2,7 @@ package gandi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -190,8 +191,11 @@ func collectPrices(list *priceList, out map[string]float64) {
 // everything after the first label of the fqdn (Gandi lists registered
 // domains, so the rest of the name is the TLD, such as co.uk).
 func domainTLD(d domain) string {
-	if t := normalizeTLD(d.TLD); t != "" {
-		return t
+	var tld string
+	if json.Unmarshal(d.TLD, &tld) == nil {
+		if t := normalizeTLD(tld); t != "" {
+			return t
+		}
 	}
 	if _, rest, ok := strings.Cut(d.FQDN, "."); ok {
 		return normalizeTLD(rest)
