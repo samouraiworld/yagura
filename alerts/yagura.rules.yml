@@ -76,6 +76,37 @@ groups:
           summary: "Scaleway month-to-date cost is over budget ({{ $labels.currency }}, {{ $labels.instance }})"
           description: "Scaleway consumption since the 1st of the month is {{ printf \"%.2f\" $value }} {{ $labels.currency }}, above the budget set in this alert rule."
 
+      - alert: YaguraTotalMonthlyCostOverBudget
+        # 100 is an example monthly budget: edit it to yours. The total is
+        # the Scaleway amount month to date plus one twelfth of the Gandi
+        # yearly renewal estimate (renewal prices of the autorenew domains),
+        # both excluding VAT; Netlify and Supabase expose no costs and are
+        # not included. Currencies are never added together. Each exporter
+        # instance, i.e. each organization, is compared on its own, as in
+        # YaguraMonthlyCostOverBudget; a side with no series (no Scaleway or
+        # no Gandi collector) just adds nothing. The "part" label keeps the
+        # two sides apart so that "or" keeps both before they are summed.
+        expr: |
+          sum without (part) (
+              label_replace(
+                sum without (project_id, project_name, category) (yagura_scaleway_consumption_amount),
+                "part", "scaleway", "", "")
+            or
+              label_replace(
+                sum without (domain) (
+                  yagura_gandi_domain_renewal_price
+                  * on (job, instance, domain) group_left ()
+                  (yagura_gandi_domain_autorenew == 1)
+                ) / 12,
+                "part", "gandi", "", "")
+          ) > 100
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Total monthly cost is over budget ({{ $labels.currency }}, {{ $labels.instance }})"
+          description: "Scaleway month to date plus one twelfth of the Gandi yearly renewal estimate (autorenew domains) is {{ printf \"%.2f\" $value }} {{ $labels.currency }}, above the budget set in this alert rule. Both exclude VAT; Netlify and Supabase costs are not included."
+
       - alert: YaguraSupabaseProjectUnhealthy
         # A project in a failed or UNKNOWN status, or one service of an active project
         # that is not healthy; the services of an ACTIVE_UNHEALTHY project do
