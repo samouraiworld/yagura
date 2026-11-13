@@ -314,3 +314,45 @@ func TestPricesCurrencyMismatchAcrossBatches(t *testing.T) {
 		t.Fatalf("want a currency mismatch error, got %v", err)
 	}
 }
+
+// TestPricesTLDWithoutOneYearRenewal checks that a TLD Gandi renews for two
+// years at least is left out without an item error: retries cannot change it.
+func TestPricesTLDWithoutOneYearRenewal(t *testing.T) {
+	var logs bytes.Buffer
+	p, _ := newPrices(t, "", map[string]testkit.Route{
+		pricesListKey: {File: "testdata/prices_domains.json"},
+		pricesKey: {Body: `{"currency":"EUR","products":[
+			{"name":".com","process":"renew","prices":[{"duration_unit":"y","min_duration":1,"max_duration":10,"price_before_taxes":11.5}]},
+			{"name":".net","process":"renew","prices":[{"duration_unit":"y","min_duration":2,"max_duration":10,"price_before_taxes":30}]},
+			{"name":".co.uk","process":"renew","prices":[{"duration_unit":"m","min_duration":1,"max_duration":11,"price_before_taxes":1}]}
+		]}`},
+	}, &logs)
+	res, err := poll(t, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := priceValues(t, res); len(got) != 2 {
+		t.Errorf("prices = %v, want the two .com domains only", got)
+	}
+	if res.ItemErrors != 0 {
+		t.Errorf("ItemErrors = %d, want 0 for TLDs without a one-year renewal", res.ItemErrors)
+	}
+	if !strings.Contains(logs.String(), "example.net") || !strings.Contains(logs.String(), "example.co.uk") {
+		t.Errorf("left-out domains not logged: %s", logs.String())
+	}
+}
+
+func TestPricesOnlyMultiYearTLDsSucceeds(t *testing.T) {
+	p, _ := newPrices(t, "", map[string]testkit.Route{
+		pricesListKey: {File: "testdata/prices_domains.json"},
+		pricesKey: {Body: `{"currency":"EUR","products":[
+			{"name":".com","process":"renew","prices":[{"duration_unit":"y","min_duration":2,"max_duration":10,"price_before_taxes":20}]},
+			{"name":".net","process":"renew","prices":[{"duration_unit":"y","min_duration":2,"max_duration":10,"price_before_taxes":30}]},
+			{"name":".co.uk","process":"renew","prices":[{"duration_unit":"y","min_duration":2,"max_duration":10,"price_before_taxes":12}]}
+		]}`},
+	}, &bytes.Buffer{})
+	res, err := poll(t, p)
+	if err != nil || len(res.Metrics) != 0 || res.ItemErrors != 0 {
+		t.Fatalf("got %d metrics, %d item errors, err %v; want an empty successful poll", len(res.Metrics), res.ItemErrors, err)
+	}
+}

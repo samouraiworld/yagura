@@ -181,10 +181,11 @@ two pollers, plus a third one unless it is turned off:
   50 TLDs) and exports that price, excluding taxes, for each domain of the TLD.
   The price is the one Gandi quotes for your organization's price grid;
   promotions and premium domains may make the actual renewal differ. A domain
-  whose TLD gets no one-year renewal price (for example a TLD renewed for two
-  years at least) is skipped as an item error on every poll, so
-  `YaguraCollectorPartialFailure` fires; a poll where no domain gets a price
-  fails. Prices change rarely, so it polls once a day.
+  whose TLD Gandi renews for two years at least gets no price series and is
+  left out of the estimate (logged as a warning). A domain whose TLD gets no
+  usable renewal price at all is skipped as an item error, and a poll where
+  every domain is skipped that way fails. Prices change rarely, so it polls
+  once a day.
   Set `YAGURA_GANDI_PRICES_ENABLED=false` to turn it off, for example if your
   token is not allowed to read prices (the poll then fails with HTTP 403 and
   `YaguraCollectorFailing` fires).

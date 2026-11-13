@@ -86,9 +86,10 @@ func (p *pricesPoller) Poll(ctx context.Context) (poller.Result, error) {
 	slices.Sort(tlds)
 
 	prices := map[string]float64{}
+	noYear := map[string]bool{}
 	var currency string
 	for batch := range slices.Chunk(tlds, pricesBatch) {
-		cur, got, err := p.fetch(ctx, batch)
+		cur, got, multi, err := p.fetch(ctx, batch)
 		if err != nil {
 			return poller.Result{}, err
 		}
@@ -99,31 +100,45 @@ func (p *pricesPoller) Poll(ctx context.Context) (poller.Result, error) {
 		for t, v := range got {
 			prices[t] = v
 		}
+		for t := range multi {
+			noYear[t] = true
+		}
 	}
 
 	var metrics []prometheus.Metric
+	var unpriced int
 	for _, d := range domains {
-		v, ok := prices[domainTLD(d)]
+		t := domainTLD(d)
+		v, ok := prices[t]
+		if !ok && noYear[t] {
+			// Gandi does not renew this TLD for one year: retries cannot change
+			// that, so it is no item error, but the estimate leaves it out.
+			p.logger.Warn("gandi domain's TLD has no one-year renewal; left out of the prices", "domain", capped(d.FQDN))
+			continue
+		}
 		if !ok {
 			p.logger.Warn("gandi domain has no one-year renewal price; skipped", "domain", capped(d.FQDN))
 			itemErrors++
+			unpriced++
 			continue
 		}
 		metrics = append(metrics, gauge(renewalPriceDesc, v, d.FQDN, currency))
 	}
-	if len(metrics) == 0 {
-		return poller.Result{}, fmt.Errorf("gandi prices: no domain got a renewal price (%d skipped)", itemErrors)
+	if len(metrics) == 0 && unpriced > 0 {
+		return poller.Result{}, fmt.Errorf("gandi prices: no domain got a renewal price (%d skipped)", unpriced)
 	}
 	return poller.Result{Metrics: metrics, ItemErrors: itemErrors}, nil
 }
 
 // fetch asks the renewal prices of one batch of TLDs and returns the response
-// currency and the one-year price, excluding taxes, per TLD. It follows pages
+// currency, the one-year price, excluding taxes, per TLD, and the TLDs whose
+// renewal has valid prices but none for one year. It follows pages
 // like the domain listing: it stops at a page with fewer than pageSize
 // products or once the Total-Count header is reached.
-func (p *pricesPoller) fetch(ctx context.Context, tlds []string) (string, map[string]float64, error) {
+func (p *pricesPoller) fetch(ctx context.Context, tlds []string) (string, map[string]float64, map[string]bool, error) {
 	var currency string
 	out := map[string]float64{}
+	noYear := map[string]bool{}
 	var read int
 	for page := 1; page <= httpx.MaxPages; page++ {
 		q := url.Values{}
@@ -139,34 +154,35 @@ func (p *pricesPoller) fetch(ctx context.Context, tlds []string) (string, map[st
 		var list *priceList
 		hdr, err := p.client.GetJSON(ctx, pricesPath, q, &list)
 		if err != nil {
-			return "", nil, fmt.Errorf("gandi prices: page %d: %w", page, err)
+			return "", nil, nil, fmt.Errorf("gandi prices: page %d: %w", page, err)
 		}
 		if list == nil {
-			return "", nil, fmt.Errorf("gandi prices: page %d: response is not an object", page)
+			return "", nil, nil, fmt.Errorf("gandi prices: page %d: response is not an object", page)
 		}
 		// The value is not echoed: it becomes a label only once validated.
 		if !currencyPattern.MatchString(list.Currency) {
-			return "", nil, errors.New("gandi prices: response currency is not a three-letter code")
+			return "", nil, nil, errors.New("gandi prices: response currency is not a three-letter code")
 		}
 		if currency != "" && list.Currency != currency {
-			return "", nil, errors.New("gandi prices: responses use different currencies")
+			return "", nil, nil, errors.New("gandi prices: responses use different currencies")
 		}
 		currency = list.Currency
-		collectPrices(list, out)
+		collectPrices(list, out, noYear)
 		read += len(list.Products)
 		if len(list.Products) < pageSize {
-			return currency, out, nil
+			return currency, out, noYear, nil
 		}
 		if total, err := strconv.Atoi(hdr.Get("Total-Count")); err == nil && total > 0 && read >= total {
-			return currency, out, nil
+			return currency, out, noYear, nil
 		}
 	}
-	return "", nil, fmt.Errorf("gandi prices: more than %d pages", httpx.MaxPages)
+	return "", nil, nil, fmt.Errorf("gandi prices: more than %d pages", httpx.MaxPages)
 }
 
 // collectPrices adds to out the one-year price, excluding taxes, of every
-// renew product of list whose TLD has no price yet.
-func collectPrices(list *priceList, out map[string]float64) {
+// renew product of list whose TLD has no price yet, and to noYear the TLDs
+// whose renew product has valid prices, none of them for one year.
+func collectPrices(list *priceList, out map[string]float64, noYear map[string]bool) {
 	for _, prod := range list.Products {
 		if prod.Process != "renew" {
 			continue
@@ -175,14 +191,23 @@ func collectPrices(list *priceList, out map[string]float64) {
 		if _, done := out[t]; done || t == "" {
 			continue
 		}
+		var valid bool
 		for _, pr := range prod.Prices {
-			if pr.DurationUnit != "y" || pr.MinDuration > 1 || pr.MaxDuration < 1 || pr.PriceBeforeTaxes == nil {
+			if pr.PriceBeforeTaxes == nil {
 				continue
 			}
-			if v := *pr.PriceBeforeTaxes; v >= 0 && !math.IsInf(v, 0) && !math.IsNaN(v) {
+			v := *pr.PriceBeforeTaxes
+			if v < 0 || math.IsInf(v, 0) || math.IsNaN(v) {
+				continue
+			}
+			valid = true
+			if pr.DurationUnit == "y" && pr.MinDuration <= 1 && pr.MaxDuration >= 1 {
 				out[t] = v
 				break
 			}
+		}
+		if _, done := out[t]; !done && valid {
+			noYear[t] = true
 		}
 	}
 }
