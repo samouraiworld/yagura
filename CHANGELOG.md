@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-16
+
 ### Added
 
 - Gandi renewal prices: the `gandi_prices` poller exports the one-year renewal price of every domain, excluding taxes (`yagura_gandi_domain_renewal_price`, the catalog price of the domain's TLD at the organization's price grid), polled once a day (a domain listing plus one request per 50 distinct TLDs); configured with `YAGURA_GANDI_PRICES_ENABLED` and `YAGURA_GANDI_PRICES_INTERVAL`. It is on by default with a Gandi token: set `YAGURA_GANDI_PRICES_ENABLED=false` if the token may not read prices (the poller then fails with HTTP 403) or to keep prices off `/metrics`.
