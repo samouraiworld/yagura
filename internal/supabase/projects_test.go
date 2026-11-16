@@ -24,7 +24,7 @@ const (
 
 	healthPathA = "/v1/projects/" + refA + "/health"
 	healthPathB = "/v1/projects/" + refB + "/health"
-	healthKeyA  = "GET " + healthPathA + "?services=auth%2Cdb%2Cpooler%2Crealtime%2Crest%2Cstorage&timeout_ms=5000"
+	healthKeyA  = "GET " + healthPathA + "?services=auth%2Cdb%2Cpooler%2Crealtime%2Crest%2Cstorage"
 )
 
 const twoActiveProjects = `[

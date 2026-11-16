@@ -91,9 +91,9 @@ Go runtime and process metrics are also exposed.
 | `yagura_supabase_disk_size_bytes` | gauge | `project_ref` | Size of the project's disk; active projects only |
 | `yagura_supabase_disk_used_bytes` | gauge | `project_ref` | Used space on the project's disk; active projects only |
 | `yagura_supabase_disk_available_bytes` | gauge | `project_ref` | Available space on the project's disk; active projects only |
-| `yagura_netlify_last_deploy_info` | gauge | `site`, `account`, `state` | Always 1; carries the raw state of the site's last production deploy (`ready`, `error`, `building`, …) and its team slug; omitted for a site with no production deploy (omitted with an item error for a deploy without a state) |
-| `yagura_netlify_last_deploy_failed` | gauge | `site` | 1 if the site's last production deploy is in the `error` state, else 0; omitted for a site with no production deploy (omitted with an item error for a deploy without a state) |
-| `yagura_netlify_last_deploy_created_timestamp_seconds` | gauge | `site` | Unix time at which the site's last production deploy was created; omitted for a site with no production deploy (omitted with an item error if the time is missing or invalid) |
+| `yagura_netlify_last_deploy_info` | gauge | `site`, `account`, `state` | Always 1; carries the raw state of the site's last production deploy, ignoring builds skipped for no content change (`ready`, `error`, `building`, …), and its team slug; omitted for a site with no production deploy or whose 10 latest production deploys are all skipped builds (omitted with an item error for a deploy without a state) |
+| `yagura_netlify_last_deploy_failed` | gauge | `site` | 1 if the site's last production deploy, ignoring builds skipped for no content change, is in the `error` state, else 0 (0 when the 10 latest production deploys are all skipped builds); omitted for a site with no production deploy (omitted with an item error for a deploy without a state) |
+| `yagura_netlify_last_deploy_created_timestamp_seconds` | gauge | `site` | Unix time at which the site's last production deploy, ignoring builds skipped for no content change, was created; omitted for a site with no production deploy or whose 10 latest production deploys are all skipped builds (omitted with an item error if the time is missing or invalid) |
 | `yagura_netlify_build_minutes_used` | gauge | `account` | Build minutes the team has used in the current billing period (omitted with an item error if the API sends none) |
 | `yagura_netlify_build_minutes_included` | gauge | `account` | Build minutes included in the team's plan (omitted if the API sends no usable number) |
 | `yagura_netlify_build_period_end_timestamp_seconds` | gauge | `account` | Unix time at which the team's current build billing period ends (omitted with an item error if missing or invalid) |
@@ -419,8 +419,8 @@ or 403 fails the whole poll, so a token that lacks one permission makes its
 poller fail; `yagura_api_requests_total` then shows code `403` for `supabase`.
 
 Each poll must finish within 80% of its interval, and the health calls run
-four at a time, each allowed up to 5 seconds on the Supabase side. With more
-than a few dozen active projects, raise `YAGURA_SUPABASE_HEALTH_INTERVAL`.
+four at a time. With more than a few dozen active projects, raise
+`YAGURA_SUPABASE_HEALTH_INTERVAL`.
 
 **Token setup.** On the Access Tokens page of your Supabase account settings,
 create a *scoped* personal access token:
@@ -540,8 +540,9 @@ and runs two pollers, which share one rate limiter (4 requests per second;
 Netlify allows 500 per minute):
 
 - `netlify_deploys` lists every site the token's user can see, 100 per page,
-  then asks each site for its latest production deploy. A site that has never
-  had a production deploy exports no deploy series.
+  then asks each site for its 10 latest production deploys and reports the
+  first one that is not a build skipped for no content change (see below). A
+  site that has never had a production deploy exports no deploy series.
 - `netlify_builds` lists the teams of the token's user (called accounts in the
   Netlify API), then reads the build minutes of each team for the current
   billing period.
@@ -601,9 +602,16 @@ deploy of a site is in the `error` state, and resolves as soon as the site's
 latest production deploy is in any other state. When the deploy call of the
 site fails, its series is omitted and the alert keeps the last known state for
 up to 30 minutes; a call that keeps failing raises
-`YaguraCollectorPartialFailure` after 30 minutes. **Not confirmed:**
-Netlify has reported canceled builds, including builds skipped by an ignore
-command, in the `error` state; if it still does, the alert fires for them too.
+`YaguraCollectorPartialFailure` after 30 minutes.
+
+Netlify reports a build it cancels because nothing changed (for example when
+an ignore command finds no change) in the `error` state, with an error message
+containing "Canceled build due to no content change". yagura does not count
+such a skipped build: it reports the latest production deploy that is not
+one, so a real failure followed by skipped builds still fires the alert. When
+the 10 latest production deploys of a site are all skipped builds,
+`yagura_netlify_last_deploy_failed` is 0 and the site's state and creation
+time are omitted. Any other deploy in the `error` state counts as failed.
 
 ## Target scale
 

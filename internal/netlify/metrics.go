@@ -14,13 +14,13 @@ var MetricNames = []string{
 
 var (
 	deployInfoDesc = prometheus.NewDesc(MetricNames[0],
-		"Constant 1 carrying the raw state of the last production deploy of the site.",
+		"Constant 1 carrying the raw state of the last production deploy of the site, ignoring builds skipped for no content change.",
 		[]string{"site", "account", "state"}, nil)
 	deployFailedDesc = prometheus.NewDesc(MetricNames[1],
-		"Whether the last production deploy of the site failed: 1 if its state is error, 0 otherwise.",
+		"Whether the last production deploy of the site, ignoring builds skipped for no content change, failed: 1 if its state is error, 0 otherwise.",
 		[]string{"site"}, nil)
 	deployCreatedDesc = prometheus.NewDesc(MetricNames[2],
-		"Creation time of the last production deploy of the site, in seconds since the Unix epoch.",
+		"Creation time of the last production deploy of the site, ignoring builds skipped for no content change, in seconds since the Unix epoch.",
 		[]string{"site"}, nil)
 	buildUsedDesc = prometheus.NewDesc(MetricNames[3],
 		"Build minutes used by the account in the current billing period.",
