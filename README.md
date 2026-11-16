@@ -419,8 +419,8 @@ or 403 fails the whole poll, so a token that lacks one permission makes its
 poller fail; `yagura_api_requests_total` then shows code `403` for `supabase`.
 
 Each poll must finish within 80% of its interval, and the health calls run
-four at a time, each allowed up to 5 seconds on the Supabase side. With more
-than a few dozen active projects, raise `YAGURA_SUPABASE_HEALTH_INTERVAL`.
+four at a time. With more than a few dozen active projects, raise
+`YAGURA_SUPABASE_HEALTH_INTERVAL`.
 
 **Token setup.** On the Access Tokens page of your Supabase account settings,
 create a *scoped* personal access token:

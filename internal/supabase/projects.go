@@ -19,9 +19,8 @@ import (
 )
 
 const (
-	projectsPath    = "/v1/projects"
-	healthTimeoutMS = "5000"
-	healthyStatus   = "ACTIVE_HEALTHY"
+	projectsPath  = "/v1/projects"
+	healthyStatus = "ACTIVE_HEALTHY"
 )
 
 // ProjectStatuses lists the values of the project status enum of the API.
@@ -193,8 +192,8 @@ type serviceHealth struct {
 // so the failure is counted; a missing project (404) emits nothing.
 func (p *projectsPoller) health(ctx context.Context, pr project) ([]prometheus.Metric, error) {
 	q := url.Values{}
+	// No timeout_ms: the API rejects it as a query string (HTTP 400).
 	q.Set("services", strings.Join(p.services, ","))
-	q.Set("timeout_ms", healthTimeoutMS)
 	var entries []serviceHealth
 	_, err := p.client.GetJSON(ctx, projectsPath+"/"+pr.Ref+"/health", q, &entries)
 	if err == nil && entries == nil {
