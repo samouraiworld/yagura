@@ -24,8 +24,8 @@ const (
 
 	sitesKey1   = "GET /api/v1/sites?filter=all&page=1&per_page=100"
 	sitesKey2   = "GET /api/v1/sites?filter=all&page=2&per_page=100"
-	deploysKey1 = "GET /api/v1/sites/" + id1 + "/deploys?per_page=1&production=true"
-	deploysKey2 = "GET /api/v1/sites/" + id2 + "/deploys?per_page=1&production=true"
+	deploysKey1 = "GET /api/v1/sites/" + id1 + "/deploys?per_page=10&production=true"
+	deploysKey2 = "GET /api/v1/sites/" + id2 + "/deploys?per_page=10&production=true"
 )
 
 var nextLink = http.Header{"Link": {`<https://api.example.invalid/api/v1/sites?page=2>; rel="next"`}}
@@ -106,6 +106,85 @@ func TestDeploysStates(t *testing.T) {
 	created := v["yagura_netlify_last_deploy_created_timestamp_seconds"]
 	if created["demo-site"] != 1767323045 || created["demo-docs"] != 1767409445 {
 		t.Errorf("created = %v", created)
+	}
+}
+
+// skippedMessage is the error_message Netlify gives a production build it
+// cancels because nothing changed.
+const skippedMessage = "Failed during stage 'checking build content for changes': Canceled build due to no content change"
+
+// TestDeploysSkipNoContentChangeBuilds checks that builds Netlify cancels
+// because nothing changed are not reported, and that a real failure behind one
+// still is.
+func TestDeploysSkipNoContentChangeBuilds(t *testing.T) {
+	skipped := func(created string) string {
+		return `{"state":"error","error_message":"` + skippedMessage + `","created_at":"` + created + `"}`
+	}
+	const realFailure = "demo-build-script-failure"
+	tests := []struct {
+		name        string
+		body        string
+		wantState   string // "" when no info series is expected
+		wantFailed  float64
+		wantCreated float64 // 0 when no created series is expected
+	}{
+		{"skipped then ready",
+			`[` + skipped("2026-01-05T00:00:00Z") + `,{"state":"ready","created_at":"2026-01-02T03:04:05Z"}]`,
+			"ready", 0, 1767323045},
+		{"skipped then real failure",
+			`[` + skipped("2026-01-05T00:00:00Z") + `,` + skipped("2026-01-04T00:00:00Z") +
+				`,{"state":"error","error_message":"` + realFailure + `","created_at":"2026-01-03T03:04:05Z"}` +
+				`,{"state":"ready","created_at":"2026-01-02T03:04:05Z"}]`,
+			"error", 1, 1767409445},
+		{"real failure on top",
+			`[{"state":"error","error_message":"` + realFailure + `","created_at":"2026-01-03T03:04:05Z"},` + skipped("2026-01-02T00:00:00Z") + `]`,
+			"error", 1, 1767409445},
+		{"only skipped builds",
+			`[` + skipped("2026-01-05T00:00:00Z") + `,` + skipped("2026-01-04T00:00:00Z") + `]`,
+			"", 0, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			routes := map[string]testkit.Route{
+				sitesKey1:   {File: "testdata/sites_page1.json"},
+				deploysKey1: {Body: tc.body},
+			}
+			var logs bytes.Buffer
+			p, _ := newPoller(t, routes, &logs)
+			res, err := poll(t, p)
+			if err != nil {
+				t.Fatalf("poll: %v", err)
+			}
+			if res.ItemErrors != 0 {
+				t.Errorf("ItemErrors = %d, want 0", res.ItemErrors)
+			}
+			v := values(t, res)
+			info := v["yagura_netlify_last_deploy_info"]
+			if tc.wantState == "" {
+				if len(info) != 0 {
+					t.Errorf("info = %v, want none", info)
+				}
+			} else if len(info) != 1 || info["demo-team|demo-site|"+tc.wantState] != 1 {
+				t.Errorf("info = %v, want state %s", info, tc.wantState)
+			}
+			if failed := v["yagura_netlify_last_deploy_failed"]; len(failed) != 1 || failed["demo-site"] != tc.wantFailed {
+				t.Errorf("failed = %v, want demo-site %v", failed, tc.wantFailed)
+			}
+			created := v["yagura_netlify_last_deploy_created_timestamp_seconds"]
+			if tc.wantCreated == 0 {
+				if len(created) != 0 {
+					t.Errorf("created = %v, want none", created)
+				}
+			} else if len(created) != 1 || created["demo-site"] != tc.wantCreated {
+				t.Errorf("created = %v, want %v", created, tc.wantCreated)
+			}
+			out := logs.String()
+			for _, secret := range []string{realFailure, "Canceled build"} {
+				if strings.Contains(out, secret) {
+					t.Errorf("logs carry the error message %q: %s", secret, out)
+				}
+			}
+		})
 	}
 }
 

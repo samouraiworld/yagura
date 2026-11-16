@@ -22,6 +22,14 @@ import (
 const (
 	sitesPath = "/api/v1/sites"
 	pageSize  = 100
+
+	// deployPageSize is the number of latest production deploys fetched per
+	// site, so that the latest real build is found behind skipped ones.
+	deployPageSize = 10
+
+	// noContentChange appears in the error_message of a build Netlify cancels
+	// because nothing changed. Netlify gives such a build the state error.
+	noContentChange = "Canceled build due to no content change"
 )
 
 type site struct {
@@ -33,6 +41,15 @@ type site struct {
 type deploy struct {
 	State     string `json:"state"`
 	CreatedAt string `json:"created_at"`
+	// ErrorMessage is only matched against noContentChange: it is never
+	// logged, exported or put in an error.
+	ErrorMessage string `json:"error_message"`
+}
+
+// skippedBuild reports whether Netlify canceled the build of d because
+// nothing changed, which is not a failure.
+func (d deploy) skippedBuild() bool {
+	return strings.Contains(d.ErrorMessage, noContentChange)
 }
 
 // validID reports whether id is safe to put in a URL path: 1 to 64 ASCII
@@ -213,13 +230,17 @@ func (p *deploysPoller) Poll(ctx context.Context) (poller.Result, error) {
 	return poller.Result{Metrics: metrics, ItemErrors: itemErrors}, nil
 }
 
-// deploy fetches the last production deploy of one site. No deploy emits
-// nothing; a deploy without state is skipped; an unusable created_at omits the
-// timestamp series and counts as a skipped item.
+// deploy fetches the latest production deploys of one site and reports the
+// first one that is not a build skipped for no content change, so a real
+// failure followed by skipped builds still shows as failed. No deploy emits
+// nothing. When every deploy fetched is a skipped build, the last real build
+// is older than the page: only the failed series is emitted, at 0. A deploy
+// without state is skipped; an unusable created_at omits the timestamp series
+// and counts as a skipped item.
 func (p *deploysPoller) deploy(ctx context.Context, s site) ([]prometheus.Metric, error) {
 	q := url.Values{}
 	q.Set("production", "true")
-	q.Set("per_page", "1")
+	q.Set("per_page", strconv.Itoa(deployPageSize))
 	var deploys []deploy
 	_, err := p.client.GetJSON(ctx, sitesPath+"/"+s.ID+"/deploys", q, &deploys)
 	if err == nil && deploys == nil {
@@ -233,7 +254,15 @@ func (p *deploysPoller) deploy(ctx context.Context, s site) ([]prometheus.Metric
 	if len(deploys) == 0 {
 		return nil, nil
 	}
-	d := deploys[0]
+	i := 0
+	for i < len(deploys) && deploys[i].skippedBuild() {
+		i++
+	}
+	if i == len(deploys) {
+		p.logger.Debug("netlify production deploys fetched are all skipped builds; reported as not failed", "site_id", s.ID, "deploys", i)
+		return []prometheus.Metric{gauge(deployFailedDesc, 0, s.Name)}, nil
+	}
+	d := deploys[i]
 	if d.State == "" {
 		p.logger.Warn("netlify deploy has no state; skipped", "site_id", s.ID)
 		return nil, fmt.Errorf("netlify deploy of %s has no state: %w", s.ID, poller.ErrItemSkipped)

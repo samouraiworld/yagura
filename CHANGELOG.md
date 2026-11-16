@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Supabase: the `supabase_projects` poller no longer sends `timeout_ms` with the health query (`/v1/projects/{ref}/health`). The Management API rejects that parameter with HTTP 400, so every `supabase_projects` poll failed: no project status or service health series, `yagura_collector_up` stayed at 0 and `YaguraCollectorFailing` fired.
+- Netlify: a production build that Netlify cancels because nothing changed (state `error`, error message "Canceled build due to no content change") no longer counts as a failed deploy. The `netlify_deploys` poller fetches the 10 latest production deploys of each site and reports the first one that is not such a skipped build, so a real failure followed by skipped builds still shows as failed. Before, `yagura_netlify_last_deploy_failed` was 1 and `YaguraNetlifyLastDeployFailed` fired for every site whose latest production build was skipped. When all 10 are skipped builds, the failed series is 0 and the state and creation time series are omitted.
 
 ## [0.5.0] - 2026-11-16
 
