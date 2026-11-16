@@ -48,29 +48,41 @@ func TestBuildPollersStatuspage(t *testing.T) {
 }
 
 func TestBuildPollersGandi(t *testing.T) {
-	cfg, err := config.Load(func(k string) (string, bool) {
-		switch k {
-		case "YAGURA_GANDI_TOKEN":
-			return "test-token", true
-		case "YAGURA_STATUSPAGE_ENABLED":
-			return "false", true
-		}
-		return "", false
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ps, err := buildPollers(cfg, deps{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), requests: httpx.NewRequestsCounter()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got []string
-	for _, p := range ps {
-		got = append(got, p.Name())
-	}
-	want := []string{"gandi_domains", "gandi_billing"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("got %v, want %v", got, want)
+	for _, tc := range []struct {
+		name   string
+		prices string // YAGURA_GANDI_PRICES_ENABLED, empty for unset
+		want   []string
+	}{
+		{"default", "", []string{"gandi_domains", "gandi_billing", "gandi_prices"}},
+		{"prices off", "false", []string{"gandi_domains", "gandi_billing"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := config.Load(func(k string) (string, bool) {
+				switch k {
+				case "YAGURA_GANDI_TOKEN":
+					return "test-token", true
+				case "YAGURA_STATUSPAGE_ENABLED":
+					return "false", true
+				case "YAGURA_GANDI_PRICES_ENABLED":
+					return tc.prices, tc.prices != ""
+				}
+				return "", false
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ps, err := buildPollers(cfg, deps{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), requests: httpx.NewRequestsCounter()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, p := range ps {
+				got = append(got, p.Name())
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -276,7 +288,7 @@ func TestBuildPollersAll(t *testing.T) {
 	}
 	want := []string{
 		"statuspage_supabase", "statuspage_scaleway", "statuspage_netlify", "statuspage_gandi",
-		"gandi_domains", "gandi_billing",
+		"gandi_domains", "gandi_billing", "gandi_prices",
 		"scaleway_consumption",
 		"supabase_projects", "supabase_disk",
 		"netlify_deploys", "netlify_builds",

@@ -1,0 +1,44 @@
+{
+  "currency": "EUR",
+  "grid": "A",
+  "taxes": [{"name": "vat", "rate": 20, "type": "service"}],
+  "products": [
+    {
+      "name": ".com",
+      "process": "renew",
+      "status": "available",
+      "prices": [
+        {"duration_unit": "y", "min_duration": 1, "max_duration": 10, "discount": false,
+         "price_before_taxes": 11.5, "price_after_taxes": 13.8}
+      ]
+    },
+    {
+      "name": ".co.uk",
+      "process": "renew",
+      "prices": [
+        {"duration_unit": "m", "min_duration": 1, "max_duration": 11,
+         "price_before_taxes": 0.99, "price_after_taxes": 1.19},
+        {"duration_unit": "y", "min_duration": 2, "max_duration": 10,
+         "price_before_taxes": 6.5, "price_after_taxes": 7.8},
+        {"duration_unit": "y", "min_duration": 1, "max_duration": 1,
+         "price_before_taxes": 7.25, "price_after_taxes": 8.7}
+      ]
+    },
+    {
+      "name": ".net",
+      "process": "create",
+      "prices": [
+        {"duration_unit": "y", "min_duration": 1, "max_duration": 10,
+         "price_before_taxes": 99, "price_after_taxes": 118.8}
+      ]
+    },
+    {
+      "name": "net",
+      "process": "renew",
+      "prices": [
+        {"duration_unit": "y", "min_duration": 1, "max_duration": 10,
+         "price_before_taxes": 14, "price_after_taxes": 16.8}
+      ]
+    }
+  ]
+}

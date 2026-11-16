@@ -18,6 +18,8 @@ type GandiConfig struct {
 	SharingID       string        // YAGURA_GANDI_SHARING_ID, empty for the token's default scope
 	DomainsInterval time.Duration // YAGURA_GANDI_DOMAINS_INTERVAL
 	BillingInterval time.Duration // YAGURA_GANDI_BILLING_INTERVAL
+	PricesEnabled   bool          // YAGURA_GANDI_PRICES_ENABLED
+	PricesInterval  time.Duration // YAGURA_GANDI_PRICES_INTERVAL
 }
 
 // loadGandi reads the YAGURA_GANDI_* variables. It returns nil when no token
@@ -44,6 +46,13 @@ func loadGandi(lookup LookupFunc) (*GandiConfig, error) {
 		return nil, err
 	}
 	if g.BillingInterval, err = duration(lookup, "YAGURA_GANDI_BILLING_INTERVAL", time.Hour); err != nil {
+		return nil, err
+	}
+	if g.PricesEnabled, err = boolean(lookup, "YAGURA_GANDI_PRICES_ENABLED", true); err != nil {
+		return nil, err
+	}
+	// Renewal prices change rarely: one poll a day is enough.
+	if g.PricesInterval, err = duration(lookup, "YAGURA_GANDI_PRICES_INTERVAL", 24*time.Hour); err != nil {
 		return nil, err
 	}
 	return g, nil

@@ -199,6 +199,71 @@ tests:
 
   - interval: 1m
     input_series:
+      # demo-1, EUR: Scaleway 96 month to date plus (36 + 24) / 12 = 5 for
+      # its two autorenew domains is 101, over the 100 budget, although
+      # Scaleway alone is under it. c.example.com has no autorenew: its
+      # price is not counted.
+      - series: 'yagura_scaleway_consumption_amount{job="yagura", instance="demo-1.example.com:10100", project_id="00000000-0000-0000-0000-000000000001", project_name="demo-web", category="Compute", currency="EUR"}'
+        values: '60x120'
+      - series: 'yagura_scaleway_consumption_amount{job="yagura", instance="demo-1.example.com:10100", project_id="00000000-0000-0000-0000-000000000002", project_name="demo-data", category="Storage", currency="EUR"}'
+        values: '36x120'
+      - series: 'yagura_gandi_domain_renewal_price{job="yagura", instance="demo-1.example.com:10100", domain="a.example.com", currency="EUR"}'
+        values: '36x120'
+      - series: 'yagura_gandi_domain_renewal_price{job="yagura", instance="demo-1.example.com:10100", domain="b.example.com", currency="EUR"}'
+        values: '24x120'
+      - series: 'yagura_gandi_domain_renewal_price{job="yagura", instance="demo-1.example.com:10100", domain="c.example.com", currency="EUR"}'
+        values: '120x120'
+      - series: 'yagura_gandi_domain_autorenew{job="yagura", instance="demo-1.example.com:10100", domain="a.example.com"}'
+        values: '1x120'
+      - series: 'yagura_gandi_domain_autorenew{job="yagura", instance="demo-1.example.com:10100", domain="b.example.com"}'
+        values: '1x120'
+      - series: 'yagura_gandi_domain_autorenew{job="yagura", instance="demo-1.example.com:10100", domain="c.example.com"}'
+        values: '0x120'
+      # demo-1, USD: 99, under the budget and never added to the EUR total.
+      - series: 'yagura_scaleway_consumption_amount{job="yagura", instance="demo-1.example.com:10100", project_id="00000000-0000-0000-0000-000000000001", project_name="demo-web", category="Network", currency="USD"}'
+        values: '99x120'
+      # demo-2: Scaleway only (no Gandi series), 120: fires.
+      - series: 'yagura_scaleway_consumption_amount{job="yagura", instance="demo-2.example.com:10100", project_id="00000000-0000-0000-0000-000000000003", project_name="demo-other", category="Compute", currency="EUR"}'
+        values: '120x120'
+      # demo-3: Gandi only, 1260 / 12 = 105: fires.
+      - series: 'yagura_gandi_domain_renewal_price{job="yagura", instance="demo-3.example.com:10100", domain="example.net", currency="EUR"}'
+        values: '1260x120'
+      - series: 'yagura_gandi_domain_autorenew{job="yagura", instance="demo-3.example.com:10100", domain="example.net"}'
+        values: '1x120'
+    alert_rule_test:
+      - eval_time: 59m
+        alertname: YaguraTotalMonthlyCostOverBudget
+        exp_alerts: []
+      - eval_time: 61m
+        alertname: YaguraTotalMonthlyCostOverBudget
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: yagura
+              instance: demo-1.example.com:10100
+              currency: EUR
+            exp_annotations:
+              summary: "Total monthly cost is over budget (EUR, demo-1.example.com:10100)"
+              description: "Scaleway month to date plus one twelfth of the Gandi yearly renewal estimate (autorenew domains) is 101.00 EUR, above the budget set in this alert rule. Both exclude VAT; Netlify and Supabase costs are not included."
+          - exp_labels:
+              severity: warning
+              job: yagura
+              instance: demo-2.example.com:10100
+              currency: EUR
+            exp_annotations:
+              summary: "Total monthly cost is over budget (EUR, demo-2.example.com:10100)"
+              description: "Scaleway month to date plus one twelfth of the Gandi yearly renewal estimate (autorenew domains) is 120.00 EUR, above the budget set in this alert rule. Both exclude VAT; Netlify and Supabase costs are not included."
+          - exp_labels:
+              severity: warning
+              job: yagura
+              instance: demo-3.example.com:10100
+              currency: EUR
+            exp_annotations:
+              summary: "Total monthly cost is over budget (EUR, demo-3.example.com:10100)"
+              description: "Scaleway month to date plus one twelfth of the Gandi yearly renewal estimate (autorenew domains) is 105.00 EUR, above the budget set in this alert rule. Both exclude VAT; Netlify and Supabase costs are not included."
+
+  - interval: 1m
+    input_series:
       # aaaa…: status ACTIVE_UNHEALTHY: fires after the 5m "for", once for
       # the project; its unhealthy service raises no alert of its own.
       - series: 'yagura_supabase_project_status{project_ref="aaaaaaaaaaaaaaaaaaaa", status="ACTIVE_UNHEALTHY"}'

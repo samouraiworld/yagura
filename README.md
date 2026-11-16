@@ -80,6 +80,7 @@ Go runtime and process metrics are also exposed.
 | `yagura_statuspage_updated_timestamp_seconds` | gauge | `provider` | Unix time of the page's `updated_at` |
 | `yagura_gandi_domain_expiry_timestamp_seconds` | gauge | `domain` | Unix time at which the domain registration ends |
 | `yagura_gandi_domain_autorenew` | gauge | `domain` | 1 if the domain renews automatically, else 0 |
+| `yagura_gandi_domain_renewal_price` | gauge | `domain`, `currency` | Gandi catalog price of a one-year renewal for the domain's TLD, excluding taxes, at the organization's price grid (omitted with an item error when Gandi gives no such price for its TLD) |
 | `yagura_gandi_prepaid_balance` | gauge | `currency` | Prepaid account balance (omitted if the account has no prepaid; omitted with an item error if missing) |
 | `yagura_gandi_prepaid_warning_threshold` | gauge | `currency` | Balance below which Gandi sends a warning (omitted if the account has no prepaid or no threshold set; omitted with an item error if it is not a number) |
 | `yagura_scaleway_consumption_amount` | gauge | `project_id`, `project_name`, `category`, `currency` | Consumption month to date, as reported by the Scaleway billing API; resets on the 1st |
@@ -161,9 +162,10 @@ for that page and the poll still succeeds.
 
 ### Gandi
 
-Watches the domains held at Gandi and the prepaid account balance through the
-Gandi API v5 (`https://api.gandi.net`). It is enabled when `YAGURA_GANDI_TOKEN`
-(or `YAGURA_GANDI_TOKEN_FILE`) is set and runs two pollers:
+Watches the domains held at Gandi, their renewal prices and the prepaid
+account balance through the Gandi API v5 (`https://api.gandi.net`). It is
+enabled when `YAGURA_GANDI_TOKEN` (or `YAGURA_GANDI_TOKEN_FILE`) is set and runs
+two pollers, plus a third one unless it is turned off:
 
 - `gandi_domains` lists every domain and exports its registration end date and
   whether it renews automatically.
@@ -173,6 +175,20 @@ Gandi API v5 (`https://api.gandi.net`). It is enabled when `YAGURA_GANDI_TOKEN`
   threshold exports the balance only, also without error; the
   `YaguraGandiPrepaidBalanceLow` alert compares the two series, so it cannot
   fire until a threshold is set in Gandi.
+- `gandi_prices` lists the domains again, asks Gandi's catalog price of a
+  one-year renewal for every distinct TLD
+  (`GET /v5/billing/price/domain?name=.<tld>&processes=renew`, one request per
+  50 TLDs) and exports that price, excluding taxes, for each domain of the TLD.
+  The price is the one Gandi quotes for your organization's price grid;
+  promotions and premium domains may make the actual renewal differ. A domain
+  whose TLD Gandi renews for two years at least gets no price series and is
+  left out of the estimate (logged as a warning). A domain whose TLD gets no
+  usable renewal price at all is skipped as an item error, and a poll where
+  every domain is skipped that way fails. Prices change rarely, so it polls
+  once a day.
+  Set `YAGURA_GANDI_PRICES_ENABLED=false` to turn it off, for example if your
+  token is not allowed to read prices (the poll then fails with HTTP 403 and
+  `YaguraCollectorFailing` fires).
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -180,6 +196,8 @@ Gandi API v5 (`https://api.gandi.net`). It is enabled when `YAGURA_GANDI_TOKEN`
 | `YAGURA_GANDI_SHARING_ID` | empty | Organization ID (UUID): restricts the domain list to it and reads its billing account |
 | `YAGURA_GANDI_DOMAINS_INTERVAL` | `6h` | Domains poll interval (minimum 30s) |
 | `YAGURA_GANDI_BILLING_INTERVAL` | `1h` | Billing poll interval (minimum 30s) |
+| `YAGURA_GANDI_PRICES_ENABLED` | `true` | `false` turns the `gandi_prices` poller off |
+| `YAGURA_GANDI_PRICES_INTERVAL` | `24h` | Renewal price poll interval (minimum 30s) |
 
 Metrics are listed in the [metric reference](#metric-reference). A domain
 without a valid registration end date is skipped, and a domain without an
@@ -194,8 +212,10 @@ autorenew value exports no autorenew series; both are logged and count in
 - give it an expiry; one year is a reasonable choice, with the
   `YaguraCollectorFailing` alert to tell you when it has expired;
 - grant only the narrowest permission that lets it see domains and the
-  narrowest one that lets it see billing information. Both pollers run
-  whenever the token is set, so the token needs both.
+  narrowest one that lets it see billing information. The domain and billing
+  pollers always run when the token is set, so the token needs both. Which
+  permission the price poller needs is not confirmed (see the caveat below);
+  that poller can be turned off.
 
 **Caveat, not confirmed:** we found no published list of Gandi PAT
 permissions, so their exact labels are not confirmed, for domains or for
@@ -209,9 +229,9 @@ a file or a secret store, restrict it to one organization and give it an
 expiry.
 
 With this collector on, `/metrics` shows every domain name the token can see
-(only the organization's when `YAGURA_GANDI_SHARING_ID` is set) and the
-prepaid balance. Turn on the web config (TLS, basic
-auth) or keep the port reachable only by your Prometheus server.
+(only the organization's when `YAGURA_GANDI_SHARING_ID` is set), their renewal
+prices and the prepaid balance. Turn on the web config (TLS, basic auth) or
+keep the port reachable only by your Prometheus server.
 
 For domains held at other registrars, use a WHOIS-based exporter such as
 [`shift/domain_exporter`](https://github.com/shift/domain_exporter). TLS
@@ -246,11 +266,9 @@ keeps an empty `project_name` label, so the total is never undercounted. The
 current API reference lists no project name on consumption rows, so expect
 `project_name` to be empty; the dashboard then shows project IDs.
 
-**VAT, not confirmed:** the Scaleway console shows consumption excluding
-taxes, and the billing API serves taxes from a separate endpoint, which
-suggests the same, but we have not confirmed whether the amount the API
-returns includes VAT. Compare it with an invoice before you set a budget on
-it.
+**VAT:** the amount excludes VAT. Checked on a real account: the month total
+yagura exports matches the consumption the Scaleway CLI reports, and the
+separate taxes endpoint adds VAT on top of it.
 
 **Key setup.** In the Scaleway console, under IAM:
 
@@ -608,6 +626,33 @@ with more than a few dozen active projects, raise
 - `alerts/yagura.rules.yml`: example rules for Prometheus and vmalert. The
   `YaguraExporterDown` rule assumes the scrape job is named `yagura`. Check
   the rules with `make rules` (needs Docker).
+
+### Costs
+
+The "Costs" row of the dashboard shows what the watched services cost per
+month, excluding VAT:
+
+- Scaleway is measured: the billing API's amount month to date.
+- Gandi is an estimate: the sum of the one-year renewal prices of the domains
+  that renew automatically. The monthly totals add one twelfth of it. Gandi
+  actually charges each domain when it renews; the "Gandi renewals, next 12
+  months" panel shows those amounts by the month in which each registration
+  ends.
+- Netlify and Supabase are not included: their APIs expose usage, not costs.
+
+The monthly bars are built in Grafana from the month-to-date values already
+stored, grouped by calendar month (UTC); yagura stores no series per month,
+so the history is as long as your Prometheus or VictoriaMetrics retention.
+Months before yagura first polled Gandi prices show Scaleway only. While a
+Gandi poll fails, the last prices and autorenew values it read stay in use
+(`YaguraCollectorFailing` covers that case). Amounts in different currencies
+are never added together.
+
+The budget on the monthly bars is an example (100): edit the thresholds of
+the "Monthly cost, all services" and "Scaleway monthly cost" panels to your
+budget, and the same value in two alert rules: `YaguraMonthlyCostOverBudget`
+(Scaleway alone) and `YaguraTotalMonthlyCostOverBudget` (Scaleway month to
+date plus one twelfth of the Gandi estimate, per yagura instance).
 
 ## Security model
 
