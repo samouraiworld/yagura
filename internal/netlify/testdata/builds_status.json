@@ -1,1 +1,1 @@
-[{"active":true,"minutes":{"current":120,"included_minutes":"300","period_end_date":"2026-02-01T00:00:00Z"}}]
+{"active":0,"pending_concurrency":0,"enqueued":0,"minutes":{"current":120,"previous":95,"period_start_date":"2026-11-01T00:00:00.000-08:00","period_end_date":"2026-12-01T00:00:00.000-08:00","last_updated_at":"2026-11-15T10:00:00.000Z","included_minutes":"300","included_minutes_with_packs":"300"}}

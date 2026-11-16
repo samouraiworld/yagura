@@ -34,6 +34,8 @@ func oneAccount(build testkit.Route) map[string]testkit.Route {
 	return map[string]testkit.Route{accountsKey: {File: "testdata/accounts.json"}, buildsKey1: build}
 }
 
+// TestBuildMinutes reads the response shape Netlify sends: one JSON object,
+// with a period end that carries fractional seconds and a UTC offset.
 func TestBuildMinutes(t *testing.T) {
 	var logs bytes.Buffer
 	p, _ := newBuildsPoller(t, oneAccount(testkit.Route{File: "testdata/builds_status.json"}), &logs)
@@ -45,7 +47,7 @@ func TestBuildMinutes(t *testing.T) {
 		t.Errorf("ItemErrors = %d, want 0", res.ItemErrors)
 	}
 	v := values(t, res)
-	end := float64(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC).Unix())
+	end := float64(time.Date(2026, 12, 1, 8, 0, 0, 0, time.UTC).Unix()) // 2026-12-01T00:00:00.000-08:00
 	want := map[string]float64{
 		"yagura_netlify_build_minutes_used":                 120,
 		"yagura_netlify_build_minutes_included":             300,
@@ -61,13 +63,13 @@ func TestBuildMinutes(t *testing.T) {
 func TestBuildMinutesIncludedUnparsable(t *testing.T) {
 	cases := map[string]testkit.Route{
 		"empty":     {File: "testdata/builds_status_empty_included.json"},
-		"unlimited": {Body: `[{"minutes":{"current":120,"included_minutes":"unlimited","period_end_date":"2026-02-01T00:00:00Z"}}]`},
-		"negative":  {Body: `[{"minutes":{"current":120,"included_minutes":"-5","period_end_date":"2026-02-01T00:00:00Z"}}]`},
-		"nan":       {Body: `[{"minutes":{"current":120,"included_minutes":"NaN","period_end_date":"2026-02-01T00:00:00Z"}}]`},
-		"null":      {Body: `[{"minutes":{"current":120,"included_minutes":null,"period_end_date":"2026-02-01T00:00:00Z"}}]`},
-		"absent":    {Body: `[{"minutes":{"current":120,"period_end_date":"2026-02-01T00:00:00Z"}}]`},
-		"negnum":    {Body: `[{"minutes":{"current":120,"included_minutes":-5,"period_end_date":"2026-02-01T00:00:00Z"}}]`},
-		"inf":       {Body: `[{"minutes":{"current":120,"included_minutes":"+Inf","period_end_date":"2026-02-01T00:00:00Z"}}]`},
+		"unlimited": {Body: `{"minutes":{"current":120,"included_minutes":"unlimited","period_end_date":"2026-02-01T00:00:00Z"}}`},
+		"negative":  {Body: `{"minutes":{"current":120,"included_minutes":"-5","period_end_date":"2026-02-01T00:00:00Z"}}`},
+		"nan":       {Body: `{"minutes":{"current":120,"included_minutes":"NaN","period_end_date":"2026-02-01T00:00:00Z"}}`},
+		"null":      {Body: `{"minutes":{"current":120,"included_minutes":null,"period_end_date":"2026-02-01T00:00:00Z"}}`},
+		"absent":    {Body: `{"minutes":{"current":120,"period_end_date":"2026-02-01T00:00:00Z"}}`},
+		"negnum":    {Body: `{"minutes":{"current":120,"included_minutes":-5,"period_end_date":"2026-02-01T00:00:00Z"}}`},
+		"inf":       {Body: `{"minutes":{"current":120,"included_minutes":"+Inf","period_end_date":"2026-02-01T00:00:00Z"}}`},
 	}
 	for name, route := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -92,7 +94,7 @@ func TestBuildMinutesIncludedUnparsable(t *testing.T) {
 }
 
 func TestBuildMinutesIncludedNumeric(t *testing.T) {
-	route := testkit.Route{Body: `[{"minutes":{"current":120,"included_minutes":300,"period_end_date":"2026-02-01T00:00:00Z"}}]`}
+	route := testkit.Route{Body: `{"minutes":{"current":120,"included_minutes":300,"period_end_date":"2026-02-01T00:00:00Z"}}`}
 	var logs bytes.Buffer
 	p, _ := newBuildsPoller(t, oneAccount(route), &logs)
 	res, err := poll(t, p)
@@ -107,15 +109,51 @@ func TestBuildMinutesIncludedNumeric(t *testing.T) {
 	}
 }
 
-func TestBuildStatusEmptyArray(t *testing.T) {
-	var logs bytes.Buffer
-	p, _ := newBuildsPoller(t, oneAccount(testkit.Route{Body: `[]`}), &logs)
-	res, err := poll(t, p)
-	if err != nil {
-		t.Fatalf("poll: %v", err)
+// TestBuildStatusNotAnObject covers bodies that are valid JSON but not one
+// object, the former array shape included: each is an item error whose log
+// names the problem and never quotes the body. A second, healthy account
+// keeps the poll alive (zero-success guard).
+func TestBuildStatusNotAnObject(t *testing.T) {
+	const marker = "demo-body-marker"
+	bodies := map[string]string{
+		"array":       `[{"minutes":{"current":120,"included_minutes":"300","period_end_date":"2026-02-01T00:00:00Z"},"note":"` + marker + `"}]`,
+		"empty array": `[]`,
+		"null":        `null`,
+		"string":      `"` + marker + `"`,
+		"number":      `42`,
+		"boolean":     `true`,
 	}
-	if len(res.Metrics) != 0 || res.ItemErrors != 0 {
-		t.Errorf("metrics = %d, ItemErrors = %d, want 0, 0", len(res.Metrics), res.ItemErrors)
+	for name, body := range bodies {
+		t.Run(name, func(t *testing.T) {
+			routes := map[string]testkit.Route{
+				accountsKey: {Body: `[{"id":"` + acct1 + `","slug":"demo-team"},{"id":"` + acct2 + `","slug":"demo-docs"}]`},
+				buildsKey1:  {Body: body},
+				buildsKey2:  {File: "testdata/builds_status.json"},
+			}
+			var logs bytes.Buffer
+			p, _ := newBuildsPoller(t, routes, &logs)
+			res, err := poll(t, p)
+			if err != nil {
+				t.Fatalf("poll: %v", err)
+			}
+			if res.ItemErrors != 1 {
+				t.Errorf("ItemErrors = %d, want 1", res.ItemErrors)
+			}
+			v := values(t, res)
+			for _, name := range MetricNames[3:] {
+				if _, ok := v[name]["demo-team"]; ok || len(v[name]) != 1 {
+					t.Errorf("%s = %v, want only demo-docs", name, v[name])
+				}
+			}
+			for _, want := range []string{"level=WARN", "account_id=" + acct1, "response is not a JSON object"} {
+				if !strings.Contains(logs.String(), want) {
+					t.Errorf("logs lack %q: %s", want, logs.String())
+				}
+			}
+			if strings.Contains(logs.String(), marker) {
+				t.Errorf("logs quote the body: %s", logs.String())
+			}
+		})
 	}
 }
 
@@ -126,14 +164,17 @@ func TestBuildStatusItemCases(t *testing.T) {
 		wantSeries map[string]int
 		wantErrors int
 	}{
-		{"no minutes object", testkit.Route{Body: `[{"active":true}]`}, nil, 1},
-		{"missing current", testkit.Route{Body: `[{"minutes":{"included_minutes":"300","period_end_date":"2026-02-01T00:00:00Z"}}]`},
+		{"no minutes object", testkit.Route{Body: `{"active":0,"pending_concurrency":0,"enqueued":0}`}, nil, 1},
+		{"empty object", testkit.Route{Body: `{}`}, nil, 1},
+		{"minutes not an object", testkit.Route{Body: `{"minutes":"none"}`}, nil, 1},
+		{"missing current", testkit.Route{Body: `{"minutes":{"included_minutes":"300","period_end_date":"2026-02-01T00:00:00Z"}}`},
 			map[string]int{"yagura_netlify_build_minutes_included": 1, "yagura_netlify_build_period_end_timestamp_seconds": 1}, 1},
-		{"missing period", testkit.Route{Body: `[{"minutes":{"current":1,"included_minutes":"300"}}]`},
+		{"missing period", testkit.Route{Body: `{"minutes":{"current":1,"included_minutes":"300"}}`},
 			map[string]int{"yagura_netlify_build_minutes_used": 1, "yagura_netlify_build_minutes_included": 1}, 1},
-		{"bad period", testkit.Route{Body: `[{"minutes":{"current":1,"included_minutes":"300","period_end_date":"soon"}}]`},
+		{"bad period", testkit.Route{Body: `{"minutes":{"current":1,"included_minutes":"300","period_end_date":"soon"}}`},
 			map[string]int{"yagura_netlify_build_minutes_used": 1, "yagura_netlify_build_minutes_included": 1}, 1},
-		{"null body", testkit.Route{Body: `null`}, nil, 1},
+		{"null included", testkit.Route{Body: `{"minutes":{"current":1,"included_minutes":null,"period_end_date":"2026-12-01T00:00:00.000-08:00"}}`},
+			map[string]int{"yagura_netlify_build_minutes_used": 1, "yagura_netlify_build_period_end_timestamp_seconds": 1}, 0},
 		{"not found", testkit.Route{Status: 404, Body: `{}`}, nil, 0},
 	}
 	for _, tc := range tests {
@@ -148,13 +189,6 @@ func TestBuildStatusItemCases(t *testing.T) {
 			res, err := poll(t, p)
 			if err != nil {
 				t.Fatalf("poll: %v", err)
-			}
-			if tc.name == "null body" {
-				for _, want := range []string{"level=WARN", "account_id=" + acct1, "response is not an array"} {
-					if !strings.Contains(logs.String(), want) {
-						t.Errorf("logs lack %q: %s", want, logs.String())
-					}
-				}
 			}
 			if tc.name == "not found" && strings.Contains(logs.String(), "level=WARN") {
 				t.Errorf("404 must not warn: %s", logs.String())

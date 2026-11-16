@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Netlify: the `netlify_builds` poller decodes the build status of a team (`/api/v1/{account_id}/builds/status`) as the single JSON object Netlify returns, not as an array. Every `netlify_builds` poll failed before, so `yagura_collector_up` stayed at 0 and `YaguraCollectorFailing` fired. A body that is not one JSON object counts as an item error.
 - Dashboard: the "Scaleway month to date by project" chart gives eight common categories a fixed colour of their own (other categories are grey) and no longer clips long project names; the "Domain expiry" table lists its columns by name, so extra scrape labels no longer show up.
 - README: the Scaleway amount is confirmed to exclude VAT.
 

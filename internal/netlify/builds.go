@@ -1,6 +1,7 @@
 package netlify
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -23,6 +24,8 @@ type account struct {
 	Slug string `json:"slug"`
 }
 
+// buildStatus is the body of /api/v1/{account_id}/builds/status: one JSON
+// object per account. Only the fields yagura exports are decoded.
 type buildStatus struct {
 	Minutes *struct {
 		Current         *float64        `json:"current"`
@@ -110,25 +113,23 @@ func (p *buildsPoller) Poll(ctx context.Context) (poller.Result, error) {
 	return poller.Result{Metrics: metrics, ItemErrors: itemErrors}, nil
 }
 
-// status fetches the build minutes of one account. No status emits nothing.
-// A missing minutes object skips the item; a missing current or unusable
-// period end omits that series and counts as a skipped item; an unusable
-// included_minutes only omits its series.
+// status fetches the build minutes of one account. A body that is not one
+// JSON object fails the item. A missing minutes object skips the item; a
+// missing current or unusable period end omits that series and counts as a
+// skipped item; an unusable included_minutes only omits its series.
 func (p *buildsPoller) status(ctx context.Context, a account) ([]prometheus.Metric, error) {
-	var statuses []buildStatus
-	_, err := p.client.GetJSON(ctx, "/api/v1/"+a.ID+"/builds/status", nil, &statuses)
-	if err == nil && statuses == nil {
-		err = errors.New("response is not an array")
+	var raw json.RawMessage
+	_, err := p.client.GetJSON(ctx, "/api/v1/"+a.ID+"/builds/status", nil, &raw)
+	var st buildStatus
+	if err == nil {
+		err = decodeBuildStatus(raw, &st)
 	}
 	if err != nil {
 		err = fmt.Errorf("netlify build status of %s: %w", a.ID, err)
 		logItemError(ctx, p.logger, "build status", "account_id", a.ID, err)
 		return nil, err
 	}
-	if len(statuses) == 0 {
-		return nil, nil
-	}
-	m := statuses[0].Minutes
+	m := st.Minutes
 	if m == nil {
 		p.logger.Warn("netlify build status has no minutes; skipped", "account_id", a.ID)
 		return nil, fmt.Errorf("netlify build status of %s has no minutes: %w", a.ID, poller.ErrItemSkipped)
@@ -154,6 +155,19 @@ func (p *buildsPoller) status(ctx context.Context, a account) ([]prometheus.Metr
 		return out, fmt.Errorf("netlify build status of %s is incomplete: %w", a.ID, poller.ErrItemSkipped)
 	}
 	return out, nil
+}
+
+// decodeBuildStatus decodes one build status object into st. Any other JSON
+// value (array, null, string, number, boolean) is an error; no error quotes
+// the body.
+func decodeBuildStatus(raw json.RawMessage, st *buildStatus) error {
+	if t := bytes.TrimLeft(raw, " \t\r\n"); len(t) == 0 || t[0] != '{' {
+		return errors.New("response is not a JSON object")
+	}
+	if err := json.Unmarshal(raw, st); err != nil {
+		return fmt.Errorf("%w: %v", httpx.ErrDecode, err)
+	}
+	return nil
 }
 
 // parseIncluded reads included_minutes, sent as a JSON string or number. Null,
