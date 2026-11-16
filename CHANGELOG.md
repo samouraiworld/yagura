@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-16
+
 ### Fixed
 
 - Supabase: the `supabase_projects` poller no longer sends `timeout_ms` with the health query (`/v1/projects/{ref}/health`). The Management API rejects that parameter with HTTP 400, so every `supabase_projects` poll failed: no project status or service health series, `yagura_collector_up` stayed at 0 and `YaguraCollectorFailing` fired.
