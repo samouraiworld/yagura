@@ -124,18 +124,28 @@ func bodyKind(contentType string, body []byte) (string, error) {
 }
 
 // jsonParams reads a JSON object whose values are strings or numbers; null
-// counts as absent.
+// counts as absent. The object is read member by member, so a key repeated
+// with different values is caught like any other conflict.
 func jsonParams(body []byte, add func(k, v string) error) error {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.UseNumber()
-	var obj map[string]any
-	if err := dec.Decode(&obj); err != nil || obj == nil {
-		return badRequest("body must be a JSON object")
+	notObject := badRequest("body must be a JSON object")
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return notObject
 	}
-	if _, err := dec.Token(); err != io.EOF {
-		return badRequest("body has data after the JSON object")
-	}
-	for k, v := range obj {
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return notObject
+		}
+		k, ok := tok.(string)
+		if !ok {
+			return notObject
+		}
+		var v any
+		if err := dec.Decode(&v); err != nil {
+			return notObject
+		}
 		var s string
 		switch v := v.(type) {
 		case nil:
@@ -150,6 +160,12 @@ func jsonParams(body []byte, add func(k, v string) error) error {
 		if err := add(k, s); err != nil {
 			return err
 		}
+	}
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('}') {
+		return notObject
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return badRequest("body has data after the JSON object")
 	}
 	return nil
 }

@@ -637,17 +637,25 @@ Set `YAGURA_STATE_DIR` to an existing directory. yagura keeps one file there,
 file in the same directory, fsync, rename). On first start, when the file does
 not exist, yagura creates it with the budgets of `YAGURA_BUDGET_INITIAL_TOTAL`
 and `YAGURA_BUDGET_INITIAL_SCALEWAY` (each optional; no amount is set by
-default). Later starts ignore those two variables. A file that cannot be read
-or parsed stops yagura at startup; it is never reset silently. Only one yagura
-instance may use a state directory: run the store and the API on a single
-instance.
+default). Later starts ignore those two variables. The directory must
+therefore be writable by yagura on the first start, and always while the API
+is on. A file that cannot be read or parsed, has an unknown key, or is not a
+regular file stops yagura at startup; it is never reset silently. yagura
+reads the file at startup only: stop it before editing the file by hand, or
+the next change through the API overwrites the edit. Only one yagura instance
+may use a state directory: run the store and the API on a single instance.
+
+With Docker, mount a host directory owned by the container user (UID 65532),
+as in the `docker-compose.yml` example. A named volume mounted on a path that
+does not exist in the image is created owned by root, and yagura cannot write
+to it.
 
 ### Business projects
 
 Each Scaleway project seen in the current month's billing data belongs to a
-business project. The automatic rule takes the Scaleway project name, trims
-it, cuts it at the first `-`, lowercases it and replaces spaces with `-`:
-`acme-backups` gives `acme`, `Big Suite` gives `big-suite`. When the name is
+business project. The automatic rule takes the Scaleway project name, cuts it
+at the first `-`, trims it, lowercases it and replaces spaces with `-`:
+`acme-backups` and `Acme - prod` give `acme`, `Big Suite` gives `big-suite`. When the name is
 empty, or the result is not a valid project name (`^[a-z0-9][a-z0-9-]{0,62}$`,
 for example a name with an accent or `_`), the project ID is used instead. A
 manual mapping set through the API replaces the rule for one project ID.
@@ -683,8 +691,8 @@ sum by (project) (
 
 Off by default. Set `YAGURA_API_LISTEN_ADDRESS`, `YAGURA_STATE_DIR` and
 `YAGURA_API_TOKEN` (or `YAGURA_API_TOKEN_FILE`, re-read on every request) to
-turn it on; a missing piece is a startup error. Generate the token with
-`openssl rand -hex 32`. The API has its own listener, without TLS: bind it to
+turn it on; a missing piece is a startup error. The token must be random and
+at least 32 characters long: generate it with `openssl rand -hex 32`. The API has its own listener, without TLS: bind it to
 loopback or an internal network only, and never route it from the Internet.
 `/metrics` stays on `YAGURA_LISTEN_ADDRESS`.
 
@@ -718,6 +726,11 @@ project budget matches no Scaleway project seen in billing:
 
 Each change writes one log line with the action, the parameters, the old and
 new values and the client address. The token is never logged.
+
+The examples below put the token on the command line, where other local users
+can see it (`ps`) and the shell history keeps it. On a shared host, store the
+header line `Authorization: Bearer <token>` in a 0600 file and pass
+`-H @that-file` instead (curl 7.55 or later).
 
 ```sh
 curl -s -H 'Authorization: Bearer <token>' http://127.0.0.1:10101/api/v1/budgets

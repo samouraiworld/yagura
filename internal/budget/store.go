@@ -85,10 +85,14 @@ type Options struct {
 type Store struct {
 	path       string
 	now        func() time.Time
+	logger     *slog.Logger
 	maxEntries int
 
-	mu sync.RWMutex
-	st state
+	// wmu serializes writers, so that a slow file write never holds mu,
+	// which every scrape takes to read the budgets.
+	wmu sync.Mutex
+	mu  sync.RWMutex
+	st  state
 }
 
 // Open loads the store from opts.Dir, creating it with the seeds when the
@@ -105,14 +109,18 @@ func Open(opts Options) (*Store, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("budget store: %s is not a directory", opts.Dir)
 	}
-	s := &Store{path: filepath.Join(opts.Dir, FileName), now: opts.Now, maxEntries: MaxEntries}
-	if s.now == nil {
-		s.now = time.Now
-	}
 	logger := opts.Logger
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
+	if info.Mode().Perm()&0o022 != 0 {
+		logger.Warn("budget store: the state directory is writable by group or others", "path", opts.Dir)
+	}
+	s := &Store{path: filepath.Join(opts.Dir, FileName), now: opts.Now, logger: logger, maxEntries: MaxEntries}
+	if s.now == nil {
+		s.now = time.Now
+	}
+	removeLeftovers(opts.Dir, logger)
 	seeded := opts.InitialTotal > 0 || opts.InitialScaleway > 0
 
 	switch st, err := load(s.path); {
@@ -142,6 +150,9 @@ func Open(opts Options) (*Store, error) {
 		return nil, err
 	default:
 		s.st = st
+		if info, err := os.Stat(s.path); err == nil && info.Mode().Perm()&0o077 != 0 {
+			logger.Warn("budget store: the file is readable or writable by group or others; expected 0600", "path", s.path)
+		}
 	}
 	if seeded {
 		logger.Info("budget seeds ignored: the store already exists", "path", s.path)
@@ -156,11 +167,20 @@ func Open(opts Options) (*Store, error) {
 
 // load reads and validates the store file.
 func load(path string) (state, error) {
-	f, err := os.Open(path) //nolint:gosec // G304: the path is the operator's state directory
+	info, err := os.Lstat(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return state{}, err
 		}
+		return state{}, fmt.Errorf("budget store: %w", err)
+	}
+	// A symlink, FIFO or device is refused: a FIFO would block startup and
+	// a symlink would read a file outside the state directory.
+	if !info.Mode().IsRegular() {
+		return state{}, fmt.Errorf("budget store: %s is not a regular file", path)
+	}
+	f, err := os.Open(path) //nolint:gosec // G304: the path is the operator's state directory
+	if err != nil {
 		return state{}, fmt.Errorf("budget store: %w", err)
 	}
 	defer func() { _ = f.Close() }()
@@ -173,6 +193,9 @@ func load(path string) (state, error) {
 	}
 	var st state
 	dec := json.NewDecoder(bytes.NewReader(data))
+	// A misspelled key would otherwise load as an empty section, and the
+	// next change would drop its data from the file.
+	dec.DisallowUnknownFields()
 	if err := dec.Decode(&st); err != nil {
 		return state{}, fmt.Errorf("budget store: %s is not valid JSON: %w", path, err)
 	}
@@ -182,7 +205,29 @@ func load(path string) (state, error) {
 	if err := st.validate(); err != nil {
 		return state{}, fmt.Errorf("budget store: %s: %w", path, err)
 	}
+	st.sort()
 	return st, nil
+}
+
+// removeLeftovers removes temporary files that a crash during a save or a
+// probe may have left in dir. It is best effort: the store works without it.
+func removeLeftovers(dir string, logger *slog.Logger) {
+	for _, pattern := range []string{".budgets-*.tmp", ".probe-*"} {
+		matches, _ := filepath.Glob(filepath.Join(dir, pattern))
+		for _, m := range matches {
+			if err := os.Remove(m); err != nil {
+				logger.Warn("budget store: cannot remove a leftover temporary file", "path", m, "error", err)
+			}
+		}
+	}
+}
+
+// sort orders the entries the way the file and the API list them.
+func (st *state) sort() {
+	slices.SortFunc(st.Budgets, func(a, b Budget) int {
+		return cmp.Or(cmp.Compare(a.Scope, b.Scope), cmp.Compare(a.Project, b.Project))
+	})
+	slices.SortFunc(st.Mappings, func(a, b Mapping) int { return cmp.Compare(a.ProjectID, b.ProjectID) })
 }
 
 func (st state) validate() error {
@@ -242,10 +287,7 @@ func probeWritable(dir string) error {
 // written, synced and renamed over the store file, then the directory is
 // synced so that the rename survives a crash.
 func (s *Store) save(st state) error {
-	slices.SortFunc(st.Budgets, func(a, b Budget) int {
-		return cmp.Or(cmp.Compare(a.Scope, b.Scope), cmp.Compare(a.Project, b.Project))
-	})
-	slices.SortFunc(st.Mappings, func(a, b Mapping) int { return cmp.Compare(a.ProjectID, b.ProjectID) })
+	st.sort()
 	if st.Budgets == nil {
 		st.Budgets = []Budget{}
 	}
@@ -286,9 +328,15 @@ func (s *Store) save(st state) error {
 		return fmt.Errorf("budget store: %w", err)
 	}
 	ok = true
-	if d, err := os.Open(dir); err == nil { //nolint:gosec // G304: the operator's state directory
-		_ = d.Sync()
+	// The change is saved; a failed directory sync only weakens its
+	// durability after a crash, so it is logged, not returned.
+	d, err := os.Open(dir) //nolint:gosec // G304: the operator's state directory
+	if err == nil {
+		err = d.Sync()
 		_ = d.Close()
+	}
+	if err != nil {
+		s.logger.Warn("budget store: cannot sync the state directory after a save", "error", err)
 	}
 	return nil
 }
@@ -323,20 +371,25 @@ func (s *Store) Mappings() []Mapping {
 
 // update applies change to a copy of the state, saves it, then swaps it in.
 func (s *Store) update(change func(st *state) error) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	s.mu.RLock()
 	st := state{
 		Version:  s.st.Version,
 		Budgets:  slices.Clone(s.st.Budgets),
 		Mappings: slices.Clone(s.st.Mappings),
 	}
+	s.mu.RUnlock()
 	if err := change(&st); err != nil {
 		return err
 	}
 	if err := s.save(st); err != nil {
 		return err
 	}
+	st.sort()
+	s.mu.Lock()
 	s.st = st
+	s.mu.Unlock()
 	return nil
 }
 

@@ -36,12 +36,15 @@ services:
     # `mkdir -m 0700 state && sudo chown 65532:65532 state`; it is ignored by
     # git and left out of the Docker build context. Inside the container the
     # API listens on all interfaces so that Docker can forward to it; publish
-    # it on 127.0.0.1 only and never route it from the Internet. The token
-    # file (at least 32 characters, `openssl rand -hex 32`) must be readable
-    # by UID 65532, like the token above.
+    # it on 127.0.0.1 only and never route it from the Internet. Other
+    # containers on the same Compose network can reach it too: keep services
+    # you do not trust off yagura's network. The token file (random, at least
+    # 32 characters, `openssl rand -hex 32`) gives write access: make it
+    # readable by UID 65532 only, for example
+    # `sudo chown root:65532 secrets/api_token && sudo chmod 0440 secrets/api_token`,
+    # not world-readable.
     #
-    # ports:
-    #   - "10100:10100"
+    # Add the API port to the `ports` list above:
     #   - "127.0.0.1:10101:10101"
     # volumes:
     #   - ./state:/var/lib/yagura

@@ -56,6 +56,18 @@ func run(ctx context.Context, lookup config.LookupFunc, stderr io.Writer) error 
 		catalog = scaleway.NewCatalog()
 		projects = catalog.List
 	}
+	// The token and the API port are checked before the store is opened, so
+	// that a failed start does not create budgets.json with the seeds.
+	var apiListener net.Listener
+	if a := cfg.API; a != nil {
+		if err := api.CheckToken(a.Token.Read); err != nil {
+			return err
+		}
+		if apiListener, err = (&net.ListenConfig{}).Listen(context.Background(), "tcp", a.ListenAddress); err != nil {
+			return fmt.Errorf("YAGURA_API_LISTEN_ADDRESS: %w", err)
+		}
+		defer func() { _ = apiListener.Close() }()
+	}
 	var store *budget.Store
 	if b := cfg.Budget; b != nil {
 		store, err = budget.Open(budget.Options{
@@ -68,16 +80,6 @@ func run(ctx context.Context, lookup config.LookupFunc, stderr io.Writer) error 
 		if err != nil {
 			return err
 		}
-	}
-	var apiListener net.Listener
-	if a := cfg.API; a != nil {
-		if err := api.CheckToken(a.Token.Read); err != nil {
-			return err
-		}
-		if apiListener, err = (&net.ListenConfig{}).Listen(ctx, "tcp", a.ListenAddress); err != nil {
-			return fmt.Errorf("YAGURA_API_LISTEN_ADDRESS: %w", err)
-		}
-		defer func() { _ = apiListener.Close() }()
 	}
 
 	requests := httpx.NewRequestsCounter()

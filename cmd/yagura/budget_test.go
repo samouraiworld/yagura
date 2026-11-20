@@ -185,3 +185,24 @@ func TestRunBudgetStartupErrors(t *testing.T) {
 		})
 	}
 }
+
+// A start that fails on the API token must not create budgets.json with the
+// seeds: corrected seeds would be ignored on the next start.
+func TestRunFailedStartKeepsSeedsUnapplied(t *testing.T) {
+	dir := t.TempDir()
+	env := map[string]string{
+		"YAGURA_STATUSPAGE_ENABLED":   "false",
+		"YAGURA_LISTEN_ADDRESS":       freeAddr(t),
+		"YAGURA_STATE_DIR":            dir,
+		"YAGURA_BUDGET_INITIAL_TOTAL": "100",
+		"YAGURA_API_LISTEN_ADDRESS":   freeAddr(t),
+		"YAGURA_API_TOKEN":            "short",
+	}
+	lookup := func(k string) (string, bool) { v, ok := env[k]; return v, ok }
+	if err := run(context.Background(), lookup, io.Discard); err == nil {
+		t.Fatal("run succeeded with a short token")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "budgets.json")); !os.IsNotExist(err) {
+		t.Errorf("budgets.json created by a failed start: %v", err)
+	}
+}

@@ -56,12 +56,28 @@ type handler struct {
 func Handler(opts Options) http.Handler {
 	h := &handler{Options: opts}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/v1/budgets", h.listBudgets)
-	mux.HandleFunc("POST /api/v1/budgets/set", h.setBudget)
-	mux.HandleFunc("POST /api/v1/budgets/unset", h.unsetBudget)
-	mux.HandleFunc("GET /api/v1/projects", h.listProjects)
-	mux.HandleFunc("POST /api/v1/projects/set", h.setProject)
-	mux.HandleFunc("POST /api/v1/projects/unset", h.unsetProject)
+	route := func(method, path string, f http.HandlerFunc) {
+		mux.HandleFunc(method+" "+path, f)
+		// Other methods on a known path get a JSON 405 rather than the
+		// mux's plain-text one. GET routes also serve HEAD.
+		allow := method
+		if method == http.MethodGet {
+			allow = "GET, HEAD"
+		}
+		mux.HandleFunc(path, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Allow", allow)
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed; use "+method)
+		})
+	}
+	route(http.MethodGet, "/api/v1/budgets", h.listBudgets)
+	route(http.MethodPost, "/api/v1/budgets/set", h.setBudget)
+	route(http.MethodPost, "/api/v1/budgets/unset", h.unsetBudget)
+	route(http.MethodGet, "/api/v1/projects", h.listProjects)
+	route(http.MethodPost, "/api/v1/projects/set", h.setProject)
+	route(http.MethodPost, "/api/v1/projects/unset", h.unsetProject)
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
+		writeError(w, http.StatusNotFound, "not found")
+	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		if !strings.HasPrefix(r.URL.Path, "/api/") {
@@ -75,25 +91,42 @@ func Handler(opts Options) http.Handler {
 	})
 }
 
+// maxAuthHeader caps the Authorization header the API hashes.
+const maxAuthHeader = 1 << 10
+
 // authorized checks the bearer token in constant time. The token and the
-// Authorization header are never logged.
+// Authorization header are never logged. A request without a usable header
+// gets 401 before the token is read.
 func (h *handler) authorized(w http.ResponseWriter, r *http.Request) bool {
+	header := r.Header.Get("Authorization")
+	got, ok := bearer(header)
+	if !ok || len(header) > maxAuthHeader {
+		h.unauthorized(w, r)
+		return false
+	}
 	want, err := h.Token()
+	if err == nil && len(want) < MinTokenLength {
+		// A rotated token file must not weaken the startup check.
+		err = fmt.Errorf("API token: shorter than %d characters; every request is refused", MinTokenLength)
+	}
 	if err != nil {
-		h.Logger.Error("cannot read the API token", "error", err)
+		h.Logger.Error("cannot use the API token", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return false
 	}
-	got, ok := bearer(r.Header.Get("Authorization"))
 	gotSum, wantSum := sha256.Sum256([]byte(got)), sha256.Sum256([]byte(want))
-	if !ok || want == "" || subtle.ConstantTimeCompare(gotSum[:], wantSum[:]) != 1 {
-		h.Logger.Warn("API request rejected: missing or wrong token",
-			"method", r.Method, "path", capped(r.URL.Path), "remote_addr", r.RemoteAddr)
-		w.Header().Set("WWW-Authenticate", `Bearer realm="yagura"`)
-		writeError(w, http.StatusUnauthorized, "unauthorized")
+	if subtle.ConstantTimeCompare(gotSum[:], wantSum[:]) != 1 {
+		h.unauthorized(w, r)
 		return false
 	}
 	return true
+}
+
+func (h *handler) unauthorized(w http.ResponseWriter, r *http.Request) {
+	h.Logger.Warn("API request rejected: missing or wrong token",
+		"method", capped(r.Method), "path", capped(r.URL.Path), "remote_addr", r.RemoteAddr)
+	w.Header().Set("WWW-Authenticate", `Bearer realm="yagura"`)
+	writeError(w, http.StatusUnauthorized, "unauthorized")
 }
 
 // bearer extracts the token of an "Authorization: Bearer <token>" header;

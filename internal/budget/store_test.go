@@ -130,6 +130,8 @@ func TestOpenErrors(t *testing.T) {
 		"duplicate mapping": write(`{"version":1,"project_mappings":[{"project_id":"` + tID1 + `","project":"a"},{"project_id":"` + tID1 + `","project":"b"}]}`),
 		"oversized":         write(`{"version":1,"x":"` + strings.Repeat("a", maxFileBytes) + `"}`),
 		"empty dir name":    "",
+		"unknown key":       write(`{"version":1,"budget":[{"scope":"total","amount":1,"currency":"EUR"}]}`),
+		"unknown entry key": write(`{"version":1,"budgets":[{"scope":"total","amount":1,"currency":"EUR","amout":2}]}`),
 	}
 	for name, dir := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -335,5 +337,58 @@ func TestConcurrentWrites(t *testing.T) {
 	s2, _ := open(t, Options{Dir: dir})
 	if got := len(s2.Budgets()); got != 20 {
 		t.Errorf("budgets after reload = %d, want 20", got)
+	}
+}
+
+func TestOpenRefusesNonRegularFile(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "elsewhere.json")
+	if err := os.WriteFile(target, []byte(`{"version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	linked := t.TempDir()
+	if err := os.Symlink(target, filepath.Join(linked, FileName)); err != nil {
+		t.Fatal(err)
+	}
+	asDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(asDir, FileName), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, dir := range map[string]string{"symlink": linked, "directory": asDir} {
+		if _, err := Open(Options{Dir: dir}); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+}
+
+func TestOpenSortsTidiesAndWarns(t *testing.T) {
+	dir := t.TempDir()
+	content := `{"version":1,"budgets":[` +
+		`{"scope":"total","amount":1,"currency":"EUR"},` +
+		`{"scope":"project","project":"zeta","amount":1,"currency":"EUR"},` +
+		`{"scope":"project","project":"acme","amount":1,"currency":"EUR"}],` +
+		`"project_mappings":[{"project_id":"` + tID2 + `","project":"b"},{"project_id":"` + tID1 + `","project":"a"}]}`
+	if err := os.WriteFile(filepath.Join(dir, FileName), []byte(content), 0o644); err != nil { //nolint:gosec // G306: the test needs a too-open file
+		t.Fatal(err)
+	}
+	leftover := filepath.Join(dir, ".budgets-123.tmp")
+	if err := os.WriteFile(leftover, []byte("partial"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, logs := open(t, Options{Dir: dir})
+	var got []string
+	for _, b := range s.Budgets() {
+		got = append(got, b.Scope+"/"+b.Project)
+	}
+	if strings.Join(got, ",") != "project/acme,project/zeta,total/" {
+		t.Errorf("Budgets() order = %v", got)
+	}
+	if m := s.Mappings(); m[0].ProjectID != tID1 {
+		t.Errorf("Mappings() order = %v", m)
+	}
+	if _, err := os.Stat(leftover); !os.IsNotExist(err) {
+		t.Errorf("leftover temporary file kept: %v", err)
+	}
+	if !strings.Contains(logs.String(), "expected 0600") {
+		t.Errorf("no warning for a 0644 file: %s", logs.String())
 	}
 }

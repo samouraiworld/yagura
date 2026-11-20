@@ -423,3 +423,63 @@ func mustJSON(t *testing.T, v any) string {
 	}
 	return string(b)
 }
+
+func TestReviewHardening(t *testing.T) {
+	f := newFixture(t)
+
+	// A key repeated in the JSON body with different values is a conflict.
+	if r := f.do(t, http.MethodPost, "/api/v1/budgets/set", "application/json", `{"scope":"total","amount":2,"amount":3}`); r.code != http.StatusBadRequest {
+		t.Errorf("duplicate JSON key: %d %s", r.code, r.raw)
+	}
+	if r := f.do(t, http.MethodPost, "/api/v1/budgets/set", "application/json", `{"scope":"total","amount":2,"amount":"2"}`); r.code != http.StatusOK {
+		t.Errorf("repeated JSON key with the same value: %d %s", r.code, r.raw)
+	}
+
+	// 404 and 405 are JSON; 405 names the allowed methods.
+	r := f.do(t, http.MethodGet, "/api/v1/budgets/set", "", "")
+	if r.code != http.StatusMethodNotAllowed || r.body["error"] == nil || r.header.Get("Allow") != "POST" {
+		t.Errorf("405: %d %v %s", r.code, r.header, r.raw)
+	}
+	if r := f.do(t, http.MethodDelete, "/api/v1/projects", "", ""); r.code != http.StatusMethodNotAllowed || r.header.Get("Allow") != "GET, HEAD" {
+		t.Errorf("405 on a GET route: %d %v", r.code, r.header)
+	}
+	if r := f.do(t, http.MethodGet, "/api/v1/nothing", "", ""); r.code != http.StatusNotFound || r.body["error"] != "not found" {
+		t.Errorf("404: %d %s", r.code, r.raw)
+	}
+	if r := f.do(t, http.MethodHead, "/api/v1/budgets", "", ""); r.code != http.StatusOK {
+		t.Errorf("HEAD: %d", r.code)
+	}
+
+	// An oversized Authorization header is refused before hashing.
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/budgets", nil)
+	req.Header.Set("Authorization", "Bearer "+f.token+strings.Repeat("x", maxAuthHeader))
+	if r := serve(t, f.h, req); r.code != http.StatusUnauthorized {
+		t.Errorf("oversized header: %d", r.code)
+	}
+	// The method is capped in the rejection log.
+	req = httptest.NewRequestWithContext(context.Background(), strings.Repeat("M", 500), "/api/v1/budgets", nil)
+	_ = serve(t, f.h, req)
+	if strings.Contains(f.logs.String(), strings.Repeat("M", 100)) {
+		t.Error("the method is not capped in the log")
+	}
+}
+
+func TestTokenProblemsAtRequestTime(t *testing.T) {
+	f := newFixture(t)
+	for name, token := range map[string]func() (string, error){
+		"short":      func() (string, error) { return "short", nil },
+		"unreadable": func() (string, error) { return "", errors.New("YAGURA_API_TOKEN_FILE: cannot read") },
+	} {
+		h := Handler(Options{Store: f.store, Token: token, Logger: slog.New(slog.DiscardHandler)})
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/budgets", nil)
+		req.Header.Set("Authorization", "Bearer short")
+		if r := serve(t, h, req); r.code != http.StatusInternalServerError {
+			t.Errorf("%s token with a header: %d", name, r.code)
+		}
+		// Without a header the client learns nothing about the token.
+		req = httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/budgets", nil)
+		if r := serve(t, h, req); r.code != http.StatusUnauthorized {
+			t.Errorf("%s token without a header: %d", name, r.code)
+		}
+	}
+}
