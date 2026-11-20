@@ -42,7 +42,7 @@ func newPoller(t *testing.T, routes map[string]testkit.Route, logs io.Writer) (p
 	srv := testkit.NewServer(t, routes)
 	client := httpx.New(httpx.Options{Provider: "scaleway", BaseURL: srv.URL})
 	logger := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	return NewConsumptionPoller(client, tOrg, time.Hour, logger, nil), srv
+	return NewConsumptionPoller(client, tOrg, time.Hour, logger, nil, nil), srv
 }
 
 func fixture(name string) testkit.Route { return testkit.Route{File: "testdata/" + name} }
@@ -147,7 +147,7 @@ func TestConsumptionQuery(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	client := httpx.New(httpx.Options{Provider: "scaleway", BaseURL: srv.URL})
-	p := NewConsumptionPoller(client, tOrg, time.Hour, slog.New(slog.DiscardHandler), nil)
+	p := NewConsumptionPoller(client, tOrg, time.Hour, slog.New(slog.DiscardHandler), nil, nil)
 	if _, err := poll(t, p); err != nil {
 		t.Fatal(err)
 	}

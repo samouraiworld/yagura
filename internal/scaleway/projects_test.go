@@ -17,7 +17,7 @@ func TestCatalogFilledBySuccessfulPoll(t *testing.T) {
 	})
 	client := httpx.New(httpx.Options{Provider: "scaleway", BaseURL: srv.URL})
 	catalog := NewCatalog()
-	p := NewConsumptionPoller(client, tOrg, time.Hour, slog.New(slog.DiscardHandler), catalog)
+	p := NewConsumptionPoller(client, tOrg, time.Hour, slog.New(slog.DiscardHandler), catalog, nil)
 	if _, err := poll(t, p); err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestCatalogFilledBySuccessfulPoll(t *testing.T) {
 	// previous metric snapshot.
 	bad := testkit.NewServer(t, map[string]testkit.Route{pageKey("1"): {Body: `{"total_count":1}`}})
 	badClient := httpx.New(httpx.Options{Provider: "scaleway", BaseURL: bad.URL})
-	p = NewConsumptionPoller(badClient, tOrg, time.Hour, slog.New(slog.DiscardHandler), catalog)
+	p = NewConsumptionPoller(badClient, tOrg, time.Hour, slog.New(slog.DiscardHandler), catalog, nil)
 	if _, err := poll(t, p); err == nil {
 		t.Fatal("poll succeeded on a page without consumptions")
 	}

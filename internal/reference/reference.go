@@ -24,6 +24,7 @@ func MetricNames() []string {
 	names = append(names, statuspage.MetricNames...)
 	names = append(names, gandi.MetricNames...)
 	names = append(names, scaleway.MetricNames...)
+	names = append(names, scaleway.HistoryMetricNames...)
 	names = append(names, supabase.MetricNames...)
 	names = append(names, netlify.MetricNames...)
 	names = append(names, budget.MetricNames...)

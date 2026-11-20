@@ -27,13 +27,15 @@ type consumptionPoller struct {
 	interval       time.Duration
 	logger         *slog.Logger
 	catalog        *Catalog
+	history        *History
 }
 
 // NewConsumptionPoller returns the poller of the organization's month-to-date
 // consumption, named "scaleway_consumption". Each successful poll replaces
-// the projects of catalog, which may be nil.
-func NewConsumptionPoller(client *httpx.Client, organizationID string, interval time.Duration, logger *slog.Logger, catalog *Catalog) poller.Poller {
-	return &consumptionPoller{client: client, organizationID: organizationID, interval: interval, logger: logger, catalog: catalog}
+// the projects of catalog and the current month of history; either may be
+// nil.
+func NewConsumptionPoller(client *httpx.Client, organizationID string, interval time.Duration, logger *slog.Logger, catalog *Catalog, history *History) poller.Poller {
+	return &consumptionPoller{client: client, organizationID: organizationID, interval: interval, logger: logger, catalog: catalog, history: history}
 }
 
 func (p *consumptionPoller) Name() string            { return "scaleway_consumption" }
@@ -80,49 +82,76 @@ func moneyAmount(units int64, nanos int32) float64 {
 	return float64(units) + float64(nanos)/1e9
 }
 
-// Poll reads every page of the current month's consumption (billing_period
-// omitted) and sums the rows per project, category and currency. It stops
-// once total_count rows are read or on an empty page; more than
-// httpx.MaxPages pages fail the poll.
+// Poll reads the current month's consumption (billing_period omitted) and
+// sums the rows per project, category and currency.
 func (p *consumptionPoller) Poll(ctx context.Context) (poller.Result, error) {
-	totals := map[groupKey]total{}
-	var updatedAt string
-	var itemErrors, read int
+	start := p.history.clock()
+	read, err := readConsumption(ctx, p.client, p.organizationID, "", p.logger)
+	if err != nil {
+		return poller.Result{}, err
+	}
+	res := p.result(read.totals, read.updatedAt, read.itemErrors)
+	p.history.observeCurrent(start, p.history.clock(), read.totals)
+	return res, nil
+}
+
+// consumptionRead is one complete read of a billing period's consumption.
+type consumptionRead struct {
+	totals     map[groupKey]total
+	updatedAt  string
+	itemErrors int
+}
+
+// readConsumption reads every page of one billing period's consumption
+// ("YYYY-MM"; empty means the current period) and sums the rows per project,
+// name, category and currency. It stops once total_count rows are read or on
+// an empty page; more than httpx.MaxPages pages fail the read. An empty list
+// is a success with no totals.
+func readConsumption(ctx context.Context, client *httpx.Client, organizationID, period string, logger *slog.Logger) (consumptionRead, error) {
+	prefix := "scaleway consumption"
+	if period != "" {
+		prefix += " " + period
+	}
+	read := consumptionRead{totals: map[groupKey]total{}}
+	rows := 0
 	for page := 1; page <= httpx.MaxPages; page++ {
 		query := url.Values{
-			"organization_id": {p.organizationID},
+			"organization_id": {organizationID},
 			"page":            {strconv.Itoa(page)},
 			"page_size":       {strconv.Itoa(pageSize)},
 		}
+		if period != "" {
+			query.Set("billing_period", period)
+		}
 		var resp consumptionsPage
-		if _, err := p.client.GetJSON(ctx, consumptionsPath, query, &resp); err != nil {
-			return poller.Result{}, fmt.Errorf("scaleway consumption: page %d: %w", page, err)
+		if _, err := client.GetJSON(ctx, consumptionsPath, query, &resp); err != nil {
+			return consumptionRead{}, fmt.Errorf("%s: page %d: %w", prefix, page, err)
 		}
 		if resp.Consumptions == nil {
-			return poller.Result{}, fmt.Errorf("scaleway consumption: page %d: missing \"consumptions\" array", page)
+			return consumptionRead{}, fmt.Errorf("%s: page %d: missing \"consumptions\" array", prefix, page)
 		}
 		if page == 1 {
-			updatedAt = resp.UpdatedAt
+			read.updatedAt = resp.UpdatedAt
 		}
 		for _, row := range resp.Consumptions {
 			if row.Value == nil || row.Value.CurrencyCode == "" {
-				p.logger.Warn("scaleway consumption row has no value or currency; row skipped",
-					"project_id", capped(row.ProjectID), "category", capped(row.CategoryName))
-				itemErrors++
+				logger.Warn("scaleway consumption row has no value or currency; row skipped",
+					"billing_period", period, "project_id", capped(row.ProjectID), "category", capped(row.CategoryName))
+				read.itemErrors++
 				continue
 			}
 			k := groupKey{row.ProjectID, row.ProjectName, row.CategoryName, row.Value.CurrencyCode}
-			t := totals[k]
+			t := read.totals[k]
 			t.units += row.Value.Units
 			t.nanos += int64(row.Value.Nanos)
-			totals[k] = t
+			read.totals[k] = t
 		}
-		read += len(resp.Consumptions)
-		if len(resp.Consumptions) == 0 || (resp.TotalCount != nil && read >= *resp.TotalCount) {
-			return p.result(totals, updatedAt, itemErrors), nil
+		rows += len(resp.Consumptions)
+		if len(resp.Consumptions) == 0 || (resp.TotalCount != nil && rows >= *resp.TotalCount) {
+			return read, nil
 		}
 	}
-	return poller.Result{}, fmt.Errorf("scaleway consumption: still incomplete after %d pages", httpx.MaxPages)
+	return consumptionRead{}, fmt.Errorf("%s: still incomplete after %d pages", prefix, httpx.MaxPages)
 }
 
 func (p *consumptionPoller) result(totals map[groupKey]total, updatedAt string, itemErrors int) poller.Result {

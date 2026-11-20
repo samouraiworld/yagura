@@ -69,6 +69,12 @@ func run(ctx context.Context, lookup config.LookupFunc, stderr io.Writer) error 
 		}
 		defer func() { _ = apiListener.Close() }()
 	}
+	// The history is opened before the budget store, so that a corrupt
+	// history file does not create budgets.json with the seeds.
+	history, err := openHistory(cfg, logger)
+	if err != nil {
+		return err
+	}
 	var store *budget.Store
 	if b := cfg.Budget; b != nil {
 		store, err = budget.Open(budget.Options{
@@ -84,7 +90,7 @@ func run(ctx context.Context, lookup config.LookupFunc, stderr io.Writer) error 
 	}
 
 	requests := httpx.NewRequestsCounter()
-	pollers, err := buildPollers(cfg, deps{logger: logger, requests: requests, catalog: catalog})
+	pollers, err := buildPollers(cfg, deps{logger: logger, requests: requests, catalog: catalog, history: history})
 	if err != nil {
 		return err
 	}
@@ -105,6 +111,9 @@ func run(ctx context.Context, lookup config.LookupFunc, stderr io.Writer) error 
 	if store != nil || projects != nil {
 		reg.MustRegister(budget.NewCollector(store, projects))
 	}
+	if history != nil {
+		reg.MustRegister(scaleway.NewHistoryCollector(history, projectMapper(store)))
+	}
 
 	attrs := []any{
 		"version", version.Version,
@@ -114,6 +123,10 @@ func run(ctx context.Context, lookup config.LookupFunc, stderr io.Writer) error 
 	}
 	if cfg.Budget != nil {
 		attrs = append(attrs, "state_dir", cfg.Budget.StateDir)
+	}
+	if history != nil {
+		attrs = append(attrs, "scaleway_history_months", cfg.Scaleway.HistoryMonths,
+			"scaleway_history_interval", cfg.Scaleway.HistoryInterval.String())
 	}
 	if apiListener != nil {
 		attrs = append(attrs, "api_listen_address", apiListener.Addr().String())
@@ -140,7 +153,11 @@ func run(ctx context.Context, lookup config.LookupFunc, stderr io.Writer) error 
 	}()
 	if apiListener != nil {
 		servers++
-		h := api.Handler(api.Options{Store: store, Projects: projects, Token: cfg.API.Token.Read, Logger: logger})
+		opts := api.Options{Store: store, Projects: projects, Token: cfg.API.Token.Read, Logger: logger}
+		if history != nil {
+			opts.History = history.Projects
+		}
+		h := api.Handler(opts)
 		go func() {
 			if err := server.ServeListener(runCtx, apiListener, h, logger); err != nil {
 				errc <- fmt.Errorf("API server: %w", err)
@@ -159,4 +176,50 @@ func run(ctx context.Context, lookup config.LookupFunc, stderr io.Writer) error 
 	}
 	<-done
 	return err
+}
+
+// openHistory opens the Scaleway monthly history when Scaleway is on and
+// YAGURA_SCALEWAY_HISTORY_MONTHS is not 0. Without YAGURA_STATE_DIR it is
+// kept in memory only.
+func openHistory(cfg *config.Config, logger *slog.Logger) (*scaleway.History, error) {
+	s := cfg.Scaleway
+	if s == nil || s.HistoryMonths == 0 {
+		return nil, nil
+	}
+	dir := ""
+	if cfg.Budget != nil {
+		dir = cfg.Budget.StateDir
+	}
+	history, err := scaleway.OpenHistory(scaleway.HistoryOptions{
+		Dir:      dir,
+		Months:   s.HistoryMonths,
+		Interval: s.HistoryInterval,
+		Logger:   logger.With("provider", "scaleway"),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if dir == "" {
+		logger.Warn("YAGURA_STATE_DIR is not set: the Scaleway monthly history is kept in memory only and read again in full after each restart")
+	}
+	return history, nil
+}
+
+// projectMapper maps history projects to business projects with the same
+// rule as yagura_scaleway_project_info: the store's manual mapping, else the
+// automatic rule. The store may be nil.
+func projectMapper(store *budget.Store) scaleway.ProjectMapper {
+	return func(projects []scaleway.Project) map[string]string {
+		var mappings []budget.Mapping
+		if store != nil {
+			mappings = store.Mappings()
+		}
+		out := make(map[string]string, len(projects))
+		for _, r := range budget.Resolve(projects, mappings) {
+			if r.InBilling {
+				out[r.ProjectID] = r.Project
+			}
+		}
+		return out
+	}
 }
