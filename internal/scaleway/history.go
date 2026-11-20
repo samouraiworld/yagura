@@ -104,9 +104,11 @@ type History struct {
 }
 
 // OpenHistory loads the history from opts.Dir. A missing file starts an
-// empty history; an unreadable, corrupt or invalid file is an error, never a
-// silent reset. The directory must be writable. Months outside the window
-// are dropped.
+// empty history. An unreadable, corrupt or invalid file is moved aside with
+// an error log, and the history is read again from the billing API: the file
+// only caches what the API still holds, so it must not stop yagura. Without a
+// writable directory the history is kept in memory. Months outside the
+// window are dropped. Only an unusable directory is an error.
 func OpenHistory(opts HistoryOptions) (*History, error) {
 	h := &History{
 		months:   opts.Months,
@@ -142,7 +144,7 @@ func OpenHistory(opts HistoryOptions) (*History, error) {
 	case errors.Is(err, fs.ErrNotExist):
 		h.logger.Info("scaleway history: no history file yet; every month will be read", "path", h.path)
 	case err != nil:
-		return nil, err
+		h.quarantine(err)
 	default:
 		for _, m := range f.Months {
 			h.records[m.BillingPeriod] = m
@@ -161,6 +163,21 @@ func OpenHistory(opts HistoryOptions) (*History, error) {
 	}
 	h.prune(h.now())
 	return h, nil
+}
+
+// quarantine renames the unusable history file to "<name>.invalid-<UTC
+// time>", kept for inspection, so that a new history replaces it. When the
+// rename fails, the file is left as it is and nothing is saved over it.
+func (h *History) quarantine(loadErr error) {
+	dst := h.path + ".invalid-" + h.now().UTC().Format("20060102T150405Z")
+	if err := os.Rename(h.path, dst); err != nil {
+		h.logger.Error("scaleway history: the history file is unusable and cannot be moved aside; the history is kept in memory only and read again from the billing API",
+			"path", h.path, "error", loadErr, "rename_error", err)
+		h.path = ""
+		return
+	}
+	h.logger.Error("scaleway history: the history file is unusable; moved aside, the history is read again from the billing API",
+		"path", h.path, "moved_to", dst, "error", loadErr)
 }
 
 func loadHistory(path string) (historyFile, error) {

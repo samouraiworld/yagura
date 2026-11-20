@@ -399,15 +399,40 @@ func TestOpenHistoryErrors(t *testing.T) {
 			`"amounts":[{"billing_period":"2026-10","kind":"untaxed","currency":"EUR","amount":1}]`, 1),
 	}
 	clock := &fakeClock{t: tNow}
+	// An unusable file is moved aside, intact, and the history starts empty:
+	// the billing API still holds every month, so yagura must not stop.
+	quarantined := func(t *testing.T, dir string, logs *bytes.Buffer) string {
+		t.Helper()
+		if !strings.Contains(logs.String(), "level=ERROR") || !strings.Contains(logs.String(), "moved aside") {
+			t.Errorf("no error log line: %s", logs)
+		}
+		moved, _ := filepath.Glob(filepath.Join(dir, HistoryFileName+".invalid-*"))
+		if len(moved) != 1 || !strings.HasSuffix(moved[0], ".invalid-20261120T120000Z") {
+			t.Fatalf("moved aside = %v", moved)
+		}
+		if _, err := os.Lstat(filepath.Join(dir, HistoryFileName)); !os.IsNotExist(err) {
+			t.Errorf("the unusable file is still in place: %v", err)
+		}
+		return moved[0]
+	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 			writeHistoryFile(t, dir, content)
-			if _, err := OpenHistory(HistoryOptions{Dir: dir, Months: 3, Interval: time.Hour, Now: clock.Now}); err == nil {
-				t.Fatal("want an error, never a silent reset")
+			h, logs := openHistory(t, dir, clock, 3)
+			moved := quarantined(t, dir, logs)
+			if got, _ := os.ReadFile(moved); string(got) != content { //nolint:gosec // G304: a test directory
+				t.Error("the moved file was changed")
 			}
-			if got, _ := os.ReadFile(filepath.Join(dir, HistoryFileName)); string(got) != content { //nolint:gosec // G304: a test directory
-				t.Error("the file was changed")
+			if months, invoices := h.due(clock.Now()); len(months) != 3 || !invoices {
+				t.Errorf("due = %v, %v; want every month read again", months, invoices)
+			}
+			h.setMonth("2026-10", nil, tNow)
+			if err := h.save(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(filepath.Join(dir, HistoryFileName)); err != nil {
+				t.Errorf("no new history file: %v", err)
 			}
 		})
 	}
@@ -427,9 +452,35 @@ func TestOpenHistoryErrors(t *testing.T) {
 		if err := os.Symlink(target, filepath.Join(dir, HistoryFileName)); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := OpenHistory(HistoryOptions{Dir: dir, Months: 3, Interval: time.Hour}); err == nil ||
-			!strings.Contains(err.Error(), "not a regular file") {
-			t.Fatalf("symlink: %v", err)
+		_, logs := openHistory(t, dir, clock, 3)
+		quarantined(t, dir, logs)
+		if !strings.Contains(logs.String(), "not a regular file") {
+			t.Errorf("logs: %s", logs)
+		}
+		if got, _ := os.ReadFile(target); string(got) != ok { //nolint:gosec // G304: a test directory
+			t.Error("the symlink target was changed")
+		}
+	})
+	t.Run("unusable file in a read-only directory", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root ignores directory permissions")
+		}
+		dir := t.TempDir()
+		t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // G302: restore the directory
+		writeHistoryFile(t, dir, "{")
+		if err := os.Chmod(dir, 0o500); err != nil { //nolint:gosec // G302: a read-only directory, on purpose
+			t.Fatal(err)
+		}
+		h, logs := openHistory(t, dir, clock, 3)
+		if !strings.Contains(logs.String(), "cannot be moved aside") {
+			t.Errorf("logs: %s", logs)
+		}
+		h.setMonth("2026-10", nil, tNow)
+		if err := h.save(); err != nil {
+			t.Errorf("save in memory-only mode: %v", err)
+		}
+		if got, _ := os.ReadFile(filepath.Join(dir, HistoryFileName)); string(got) != "{" { //nolint:gosec // G304: a test directory
+			t.Error("the unusable file was overwritten")
 		}
 	})
 	t.Run("not a directory", func(t *testing.T) {
@@ -471,9 +522,8 @@ func TestOpenHistoryErrors(t *testing.T) {
 	t.Run("last_success out of range", func(t *testing.T) {
 		dir := t.TempDir()
 		writeHistoryFile(t, dir, strings.Replace(ok, `"2026-11-01T00:00:00Z"`, `"3000-01-01T00:00:00Z"`, 1))
-		if _, err := OpenHistory(HistoryOptions{Dir: dir, Months: 3, Interval: time.Hour, Now: clock.Now}); err == nil {
-			t.Fatal("want an error")
-		}
+		_, logs := openHistory(t, dir, clock, 3)
+		quarantined(t, dir, logs)
 	})
 }
 

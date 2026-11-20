@@ -370,8 +370,10 @@ sum by (billing_period, category) (yagura_scaleway_monthly_consumption_amount{pr
   and the last success times are saved to `scaleway-history.json` (mode 0600,
   replaced atomically, at most 32 MiB: a larger history is kept in memory and
   not saved, with an error). At startup the stored months are exposed at once
-  and only due months are read. An unreadable or corrupt file stops the
-  startup; delete it to read the whole history again. Without
+  and only due months are read. An unreadable or corrupt file does not stop
+  yagura: it is renamed `scaleway-history.json.invalid-<UTC time>` and kept
+  for inspection, an error is logged, and every month is read again from the
+  billing API (delete the renamed file once checked). Without
   `YAGURA_STATE_DIR`, or when the directory is not writable (a warning is
   logged), the history is kept in memory and read again in full after each
   restart.

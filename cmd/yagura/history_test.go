@@ -1,8 +1,6 @@
 package main
 
 import (
-	"context"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -127,31 +125,5 @@ func TestProjectMapperOnHistory(t *testing.T) {
 	// Without a store, the automatic rule alone.
 	if err := testutil.CollectAndCompare(scaleway.NewHistoryCollector(h, projectMapper(nil)), strings.NewReader(want), scaleway.HistoryMetricNames[0]); err != nil {
 		t.Error(err)
-	}
-}
-
-// A corrupt history file stops the start before budgets.json is created.
-func TestRunCorruptHistoryKeepsSeedsUnapplied(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, scaleway.HistoryFileName), []byte("{"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	env := map[string]string{
-		"YAGURA_STATUSPAGE_ENABLED":       "false",
-		"YAGURA_LISTEN_ADDRESS":           freeAddr(t),
-		"YAGURA_STATE_DIR":                dir,
-		"YAGURA_BUDGET_INITIAL_TOTAL":     "100",
-		"YAGURA_SCALEWAY_SECRET_KEY":      "test-key",
-		"YAGURA_SCALEWAY_ORGANIZATION_ID": "00000000-0000-0000-0000-000000000001",
-	}
-	lookup := func(k string) (string, bool) { v, ok := env[k]; return v, ok }
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	err := run(ctx, lookup, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "scaleway history") {
-		t.Fatalf("run = %v, want a history error", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "budgets.json")); !os.IsNotExist(err) {
-		t.Errorf("budgets.json created by a failed start: %v", err)
 	}
 }

@@ -69,8 +69,8 @@ func run(ctx context.Context, lookup config.LookupFunc, stderr io.Writer) error 
 		}
 		defer func() { _ = apiListener.Close() }()
 	}
-	// The history is opened before the budget store, so that a corrupt
-	// history file does not create budgets.json with the seeds.
+	// The history is opened before the budget store, so that an unusable
+	// state directory stops the start before budgets.json gets the seeds.
 	history, err := openHistory(cfg, logger)
 	if err != nil {
 		return err
