@@ -373,7 +373,9 @@ sum by (billing_period, category) (yagura_scaleway_monthly_consumption_amount{pr
   and only due months are read. An unreadable or corrupt file does not stop
   yagura: it is renamed `scaleway-history.json.invalid-<UTC time>` and kept
   for inspection, an error is logged, and every month is read again from the
-  billing API (delete the renamed file once checked). Without
+  billing API (delete the renamed file once checked). A file that cannot be
+  read at all (permissions, disk error) is left in place and nothing is saved
+  over it. Without
   `YAGURA_STATE_DIR`, or when the directory is not writable (a warning is
   logged), the history is kept in memory and read again in full after each
   restart.

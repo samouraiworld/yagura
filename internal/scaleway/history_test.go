@@ -461,6 +461,47 @@ func TestOpenHistoryErrors(t *testing.T) {
 			t.Error("the symlink target was changed")
 		}
 	})
+	t.Run("name already taken", func(t *testing.T) {
+		dir := t.TempDir()
+		taken := filepath.Join(dir, HistoryFileName+".invalid-20261120T120000Z")
+		if err := os.WriteFile(taken, []byte("earlier"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		writeHistoryFile(t, dir, "{")
+		openHistory(t, dir, clock, 3)
+		if got, _ := os.ReadFile(taken); string(got) != "earlier" { //nolint:gosec // G304: a test directory
+			t.Error("an earlier moved file was replaced")
+		}
+		if got, _ := os.ReadFile(taken + "-1"); string(got) != "{" { //nolint:gosec // G304: a test directory
+			t.Error("the unusable file was not moved to a free name")
+		}
+	})
+	t.Run("unreadable file is left in place", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root ignores file permissions")
+		}
+		dir := t.TempDir()
+		writeHistoryFile(t, dir, ok)
+		path := filepath.Join(dir, HistoryFileName)
+		if err := os.Chmod(path, 0o200); err != nil {
+			t.Fatal(err)
+		}
+		h, logs := openHistory(t, dir, clock, 3)
+		if !strings.Contains(logs.String(), "left as it is") {
+			t.Errorf("logs: %s", logs)
+		}
+		if moved, _ := filepath.Glob(path + ".invalid-*"); len(moved) != 0 {
+			t.Errorf("an unreadable file was moved aside: %v", moved)
+		}
+		h.setMonth("2026-10", nil, tNow)
+		if err := h.save(); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.Chmod(path, 0o600)
+		if got, _ := os.ReadFile(path); string(got) != ok { //nolint:gosec // G304: a test directory
+			t.Error("the unreadable file was overwritten")
+		}
+	})
 	t.Run("unusable file in a read-only directory", func(t *testing.T) {
 		if os.Geteuid() == 0 {
 			t.Skip("root ignores directory permissions")

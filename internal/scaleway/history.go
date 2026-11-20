@@ -143,8 +143,14 @@ func OpenHistory(opts HistoryOptions) (*History, error) {
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		h.logger.Info("scaleway history: no history file yet; every month will be read", "path", h.path)
-	case err != nil:
+	case errors.Is(err, errUnusable):
 		h.quarantine(err)
+	case err != nil:
+		// An I/O error (permissions, disk) says nothing about the content:
+		// the file stays in place and nothing is saved over it.
+		h.logger.Error("scaleway history: cannot read the history file; it is left as it is, the history is kept in memory only and read again from the billing API",
+			"path", h.path, "error", err)
+		h.path = ""
 	default:
 		for _, m := range f.Months {
 			h.records[m.BillingPeriod] = m
@@ -165,12 +171,37 @@ func OpenHistory(opts HistoryOptions) (*History, error) {
 	return h, nil
 }
 
+// errUnusable marks a history file whose content or type is unusable, as
+// opposed to an I/O error while reading it.
+var errUnusable = errors.New("unusable history file")
+
 // quarantine renames the unusable history file to "<name>.invalid-<UTC
-// time>", kept for inspection, so that a new history replaces it. When the
-// rename fails, the file is left as it is and nothing is saved over it.
+// time>" (with a numeric suffix if that name is taken), kept for inspection,
+// so that a new history replaces it. When the rename fails, the file is left
+// as it is and nothing is saved over it.
 func (h *History) quarantine(loadErr error) {
-	dst := h.path + ".invalid-" + h.now().UTC().Format("20060102T150405Z")
-	if err := os.Rename(h.path, dst); err != nil {
+	base := h.path + ".invalid-" + h.now().UTC().Format("20060102T150405Z")
+	dst := base
+	for i := 1; i < 100; i++ {
+		if _, err := os.Lstat(dst); errors.Is(err, fs.ErrNotExist) {
+			break
+		}
+		dst = fmt.Sprintf("%s-%d", base, i)
+	}
+	err := os.Rename(h.path, dst)
+	if err == nil {
+		// The rename must survive a crash before the next save.
+		var d *os.File
+		if d, err = os.Open(filepath.Dir(h.path)); err == nil { //nolint:gosec // G304: the operator's state directory
+			err = d.Sync()
+			_ = d.Close()
+		}
+		if err != nil {
+			h.logger.Warn("scaleway history: cannot sync the state directory after moving the history file aside", "error", err)
+		}
+		err = nil
+	}
+	if err != nil {
 		h.logger.Error("scaleway history: the history file is unusable and cannot be moved aside; the history is kept in memory only and read again from the billing API",
 			"path", h.path, "error", loadErr, "rename_error", err)
 		h.path = ""
@@ -185,20 +216,24 @@ func loadHistory(path string) (historyFile, error) {
 	if errors.Is(err, fs.ErrNotExist) {
 		return historyFile{}, err
 	}
-	if err != nil {
+	if _, ioErr := errors.AsType[*fs.PathError](err); ioErr {
 		return historyFile{}, fmt.Errorf("scaleway history: %w", err)
+	}
+	if err != nil {
+		// Not a regular file, too large, or replaced while opened.
+		return historyFile{}, fmt.Errorf("scaleway history: %w: %w", errUnusable, err)
 	}
 	var f historyFile
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&f); err != nil {
-		return historyFile{}, fmt.Errorf("scaleway history: %s is not valid JSON: %w", path, err)
+		return historyFile{}, fmt.Errorf("scaleway history: %w: %s is not valid JSON: %w", errUnusable, path, err)
 	}
 	if _, err := dec.Token(); err != io.EOF {
-		return historyFile{}, fmt.Errorf("scaleway history: %s has data after the JSON object", path)
+		return historyFile{}, fmt.Errorf("scaleway history: %w: %s has data after the JSON object", errUnusable, path)
 	}
 	if err := f.validate(); err != nil {
-		return historyFile{}, fmt.Errorf("scaleway history: %s: %w", path, err)
+		return historyFile{}, fmt.Errorf("scaleway history: %w: %s: %w", errUnusable, path, err)
 	}
 	return f, nil
 }
