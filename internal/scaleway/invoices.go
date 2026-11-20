@@ -68,7 +68,6 @@ func invoicePeriod(s string) (string, error) {
 func readInvoices(ctx context.Context, client *httpx.Client, organizationID string) ([]InvoiceAmount, error) {
 	sums := map[invoiceKey]total{}
 	seen := map[string]bool{}
-	rows := 0
 	for page := 1; page <= httpx.MaxPages; page++ {
 		query := url.Values{
 			"organization_id": {organizationID},
@@ -96,11 +95,12 @@ func readInvoices(ctx context.Context, client *httpx.Client, organizationID stri
 				return nil, fmt.Errorf("scaleway invoices: invoice %s: %w", capped(inv.ID), err)
 			}
 		}
-		rows += len(resp.Invoices)
-		if len(resp.Invoices) == 0 && resp.TotalCount != nil && rows < *resp.TotalCount {
-			return nil, fmt.Errorf("scaleway invoices: page %d is empty after %d of %d invoices", page, rows, *resp.TotalCount)
+		// Distinct invoices are counted: a duplicate from a shifted page
+		// must not end the listing early.
+		if len(resp.Invoices) == 0 && resp.TotalCount != nil && len(seen) < *resp.TotalCount {
+			return nil, fmt.Errorf("scaleway invoices: page %d is empty after %d of %d invoices", page, len(seen), *resp.TotalCount)
 		}
-		if len(resp.Invoices) == 0 || (resp.TotalCount != nil && rows >= *resp.TotalCount) {
+		if len(resp.Invoices) == 0 || (resp.TotalCount != nil && len(seen) >= *resp.TotalCount) {
 			return invoiceAmounts(sums), nil
 		}
 	}

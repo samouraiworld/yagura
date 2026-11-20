@@ -667,3 +667,42 @@ func TestHistoryProjectsSkipEmptyID(t *testing.T) {
 		t.Errorf("Projects = %v", got)
 	}
 }
+
+// A refused key stops the reads after the first failure.
+func TestHistoryAuthErrorStopsReads(t *testing.T) {
+	clock := &fakeClock{t: tNow}
+	h, _ := openHistory(t, "", clock, 3)
+	routes := historyRoutes()
+	routes[histKey("2026-10", "1")] = testkit.Route{Status: http.StatusForbidden, Body: `{"message":"denied"}`}
+	srv := testkit.NewServer(t, routes)
+	if _, err := poll(t, newHistoryPoller(t, srv.URL, h, io.Discard)); err == nil {
+		t.Fatal("want an error")
+	}
+	for _, key := range []string{histKey("2026-09", "1"), histKey("2026-08", "1"), invKey("1")} {
+		if n := testkit.Hits(srv, "GET "+key); n != 0 {
+			t.Errorf("%s requested %d times after a refused key", key, n)
+		}
+	}
+}
+
+// A duplicate invoice from a shifted page does not end the listing early.
+func TestReadInvoicesCountsDistinctInvoices(t *testing.T) {
+	inv := func(id string) string {
+		return `{"id":"` + id + `","billing_period":"2026-09-01T00:00:00Z","total_untaxed":{"currency_code":"EUR","units":1}}`
+	}
+	srv := testkit.NewServer(t, map[string]testkit.Route{
+		invKey("1"): {Body: `{"invoices":[` + inv("a") + `,` + inv("b") + `],"total_count":3}`},
+		invKey("2"): {Body: `{"invoices":[` + inv("b") + `],"total_count":3}`},
+		invKey("3"): {Body: `{"invoices":[` + inv("c") + `],"total_count":3}`},
+	})
+	client := httpx.New(httpx.Options{Provider: "scaleway", BaseURL: srv.URL})
+	got, err := readInvoices(context.Background(), client, tOrg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range got {
+		if a.Kind == KindUntaxed && a.Amount != 3 {
+			t.Errorf("untaxed = %v, want 3 (a, b, c once each)", a.Amount)
+		}
+	}
+}

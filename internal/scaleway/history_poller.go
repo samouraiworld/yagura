@@ -46,7 +46,7 @@ func (p *historyPoller) Poll(ctx context.Context) (poller.Result, error) {
 	itemErrors := 0
 	// outOfTime is set when the poll deadline (or shutdown) stops a read:
 	// that is not a failure of the month, which stays due for the next check.
-	outOfTime := false
+	outOfTime, authFailed := false, false
 	stopped := func(err error) bool {
 		return ctx.Err() != nil || errors.Is(err, httpx.ErrPollDeadline)
 	}
@@ -60,12 +60,18 @@ func (p *historyPoller) Poll(ctx context.Context) (poller.Result, error) {
 			p.logger.Error("scaleway history: cannot read a month; stored values kept, retried in 1h",
 				"billing_period", period, "error", err)
 			h.fail(period, h.now())
+			if httpx.IsAuthError(err) {
+				// A refused key fails every read: stop here rather than log
+				// one error per month; the other reads stay due.
+				authFailed = true
+				break
+			}
 			continue
 		}
 		itemErrors += read.itemErrors
 		h.setMonth(period, monthLines(read.totals), h.now())
 	}
-	if invoices && !outOfTime {
+	if invoices && !outOfTime && !authFailed {
 		amounts, err := readInvoices(ctx, p.client, p.organizationID)
 		switch {
 		case err != nil && stopped(err):
