@@ -72,7 +72,10 @@ func (p *historyPoller) Poll(ctx context.Context) (poller.Result, error) {
 		h.setMonth(period, monthLines(read.totals), h.now())
 	}
 	if invoices && !outOfTime && !authFailed {
-		amounts, err := readInvoices(ctx, p.client, p.organizationID)
+		cur := period(now)
+		amounts, err := readInvoices(ctx, p.client, p.organizationID, func(pr string) bool {
+			return pr != cur && h.inWindow(pr, now)
+		})
 		switch {
 		case err != nil && stopped(err):
 			outOfTime = true

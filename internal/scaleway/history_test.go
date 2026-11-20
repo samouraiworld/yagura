@@ -368,7 +368,7 @@ func TestHistoryCurrentMonthAndMonthChange(t *testing.T) {
 	// A poll that crosses the month change does not update the current month.
 	h2, _ := openHistory(t, "", clock, 3)
 	start := time.Date(2026, 12, 31, 23, 59, 59, 0, time.UTC)
-	h2.observeCurrent(start, start.Add(2*time.Second), map[groupKey]total{{"p", "n", "c", "EUR"}: {units: 1}})
+	h2.observeCurrent(start, start.Add(2*time.Second), map[groupKey]total{{"p", "n", "c", "EUR"}: {units: 1}}, "")
 	if len(h2.view(start.Add(2*time.Second)).months) != 0 {
 		t.Error("a poll across the month change updated the history")
 	}
@@ -523,7 +523,7 @@ func TestReadInvoicesErrors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			srv := testkit.NewServer(t, map[string]testkit.Route{invKey("1"): {Body: body}})
 			client := httpx.New(httpx.Options{Provider: "scaleway", BaseURL: srv.URL})
-			if _, err := readInvoices(context.Background(), client, tOrg); err == nil {
+			if _, err := readInvoices(context.Background(), client, tOrg, nil); err == nil {
 				t.Fatal("want an error")
 			}
 		})
@@ -531,7 +531,7 @@ func TestReadInvoicesErrors(t *testing.T) {
 	// An empty list is a success with no amounts.
 	srv := testkit.NewServer(t, map[string]testkit.Route{invKey("1"): {Body: `{"invoices":[],"total_count":0}`}})
 	client := httpx.New(httpx.Options{Provider: "scaleway", BaseURL: srv.URL})
-	if got, err := readInvoices(context.Background(), client, tOrg); err != nil || len(got) != 0 {
+	if got, err := readInvoices(context.Background(), client, tOrg, nil); err != nil || len(got) != 0 {
 		t.Errorf("empty list = %v, %v", got, err)
 	}
 	if p, err := invoicePeriod("2026-09"); err != nil || p != "2026-09" {
@@ -581,7 +581,7 @@ func TestReadInvoicesRequiresID(t *testing.T) {
 	srv := testkit.NewServer(t, map[string]testkit.Route{invKey("1"): {Body: `{"invoices":[{"billing_period":"2026-09-01T00:00:00Z",` +
 		`"total_untaxed":{"currency_code":"EUR","units":1}}],"total_count":1}`}})
 	client := httpx.New(httpx.Options{Provider: "scaleway", BaseURL: srv.URL})
-	if _, err := readInvoices(context.Background(), client, tOrg); err == nil || !strings.Contains(err.Error(), "no id") {
+	if _, err := readInvoices(context.Background(), client, tOrg, nil); err == nil || !strings.Contains(err.Error(), "no id") {
 		t.Fatalf("readInvoices = %v, want an error for an invoice without id", err)
 	}
 }
@@ -629,14 +629,14 @@ func TestHistorySaves(t *testing.T) {
 	clock := &fakeClock{t: tNow}
 	h, _ := openHistory(t, dir, clock, 3)
 	totals := map[groupKey]total{{"0000000a-0000-0000-0000-000000000001", "Tools", "Compute", "EUR"}: {units: 1}}
-	h.observeCurrent(tNow, tNow, totals)
+	h.observeCurrent(tNow, tNow, totals, "")
 	path := filepath.Join(dir, HistoryFileName)
 	first, err := os.ReadFile(path) //nolint:gosec // G304: a test directory
 	if err != nil {
 		t.Fatal(err)
 	}
 	clock.Set(tNow.Add(time.Hour))
-	h.observeCurrent(tNow.Add(time.Hour), tNow.Add(time.Hour), totals)
+	h.observeCurrent(tNow.Add(time.Hour), tNow.Add(time.Hour), totals, "")
 	if again, _ := os.ReadFile(path); string(again) != string(first) { //nolint:gosec // G304: a test directory
 		t.Error("an unchanged current month rewrote the file")
 	}
@@ -696,7 +696,7 @@ func TestReadInvoicesCountsDistinctInvoices(t *testing.T) {
 		invKey("3"): {Body: `{"invoices":[` + inv("c") + `],"total_count":3}`},
 	})
 	client := httpx.New(httpx.Options{Provider: "scaleway", BaseURL: srv.URL})
-	got, err := readInvoices(context.Background(), client, tOrg)
+	got, err := readInvoices(context.Background(), client, tOrg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -704,5 +704,65 @@ func TestReadInvoicesCountsDistinctInvoices(t *testing.T) {
 		if a.Kind == KindUntaxed && a.Amount != 3 {
 			t.Errorf("untaxed = %v, want 3 (a, b, c once each)", a.Amount)
 		}
+	}
+}
+
+// Just after the month change, an answer last updated before the month began
+// is the previous month's data: it does not become the new month.
+func TestHistoryCurrentMonthIgnoresStaleAnswer(t *testing.T) {
+	clock := &fakeClock{t: tNow}
+	h, _ := openHistory(t, "", clock, 3)
+	at := time.Date(2026, 12, 1, 0, 10, 0, 0, time.UTC)
+	totals := map[groupKey]total{{"p", "n", "c", "EUR"}: {units: 400}}
+	h.observeCurrent(at, at, totals, "2026-11-30T23:50:00Z")
+	if len(h.view(at).months) != 0 {
+		t.Error("previous month's data stored as the new month")
+	}
+	h.observeCurrent(at, at, totals, "2026-12-01T00:05:00Z")
+	if len(h.view(at).months) != 1 {
+		t.Error("an answer updated this month was not stored")
+	}
+}
+
+// A closed month is read strictly: an invalid row or data that changes
+// between pages fails the read and keeps the stored values.
+func TestHistoryStrictClosedMonthRead(t *testing.T) {
+	cases := map[string]string{
+		"row without value": `{"consumptions":[{"project_id":"p","project_name":"n","category_name":"c"}],"total_count":5,"updated_at":"2026-10-01T06:00:00Z"}`,
+		"updated_at changed": `{"consumptions":[{"value":{"currency_code":"EUR","units":1},"project_id":"p","project_name":"n","category_name":"c"}],` +
+			`"total_count":5,"updated_at":"2026-10-03T06:00:00Z"}`,
+	}
+	for name, page2 := range cases {
+		t.Run(name, func(t *testing.T) {
+			clock := &fakeClock{t: tNow}
+			h, _ := openHistory(t, "", clock, 3)
+			srv := testkit.NewServer(t, historyRoutes())
+			if _, err := poll(t, newHistoryPoller(t, srv.URL, h, io.Discard)); err != nil {
+				t.Fatal(err)
+			}
+			routes := historyRoutes()
+			routes[histKey("2026-09", "2")] = testkit.Route{Body: page2}
+			bad := testkit.NewServer(t, routes)
+			clock.Set(tNow.Add(25 * time.Hour))
+			if _, err := poll(t, newHistoryPoller(t, bad.URL, h, io.Discard)); err == nil || !strings.Contains(err.Error(), "2026-09") {
+				t.Fatalf("poll = %v, want 2026-09 failing", err)
+			}
+			if !strings.Contains(collectText(t, h), HistoryMetricNames[0]+` billing_period="2026-09"`) {
+				t.Error("stored 2026-09 values lost")
+			}
+		})
+	}
+}
+
+// An invoice outside the kept periods is not checked: an old malformed
+// invoice does not block the recent totals.
+func TestReadInvoicesSkipsPeriodsNotKept(t *testing.T) {
+	srv := testkit.NewServer(t, map[string]testkit.Route{invKey("1"): {Body: `{"invoices":[` +
+		`{"id":"old","billing_period":"2020-01-01T00:00:00Z"},` +
+		`{"id":"new","billing_period":"2026-09-01T00:00:00Z","total_untaxed":{"currency_code":"EUR","units":5}}],"total_count":2}`}})
+	client := httpx.New(httpx.Options{Provider: "scaleway", BaseURL: srv.URL})
+	got, err := readInvoices(context.Background(), client, tOrg, func(p string) bool { return p >= "2026-01" })
+	if err != nil || len(got) != 2 || got[1].Kind != KindUntaxed || got[1].Amount != 5 {
+		t.Errorf("readInvoices = %+v, %v", got, err)
 	}
 }

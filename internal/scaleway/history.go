@@ -407,10 +407,12 @@ func (h *History) failing() []string {
 }
 
 // observeCurrent stores the current month from a successful consumption poll
-// that started at start and ended at end. A poll that crossed the month
-// change is skipped: its data may belong to either month. It is safe on a
+// that started at start and ended at end, whose answer has updatedAt. A poll
+// that crossed the month change is skipped: its data may belong to either
+// month. So is an answer last updated before the month began: just after the
+// month change it may still be the previous month's data. It is safe on a
 // nil history.
-func (h *History) observeCurrent(start, end time.Time, totals map[groupKey]total) {
+func (h *History) observeCurrent(start, end time.Time, totals map[groupKey]total, updatedAt string) {
 	if h == nil {
 		return
 	}
@@ -418,6 +420,13 @@ func (h *History) observeCurrent(start, end time.Time, totals map[groupKey]total
 	if period(start) != p {
 		h.logger.Info("scaleway history: the consumption poll crossed the month change; current month not updated")
 		return
+	}
+	if ts, err := time.Parse(time.RFC3339, updatedAt); err == nil {
+		if begin, _ := time.Parse(periodLayout, p); ts.Before(begin) {
+			h.logger.Info("scaleway history: the consumption data was last updated before this month began; current month not updated yet",
+				"billing_period", p, "updated_at", ts.UTC().Format(time.RFC3339))
+			return
+		}
 	}
 	h.prune(end)
 	h.setCurrent(p, monthLines(totals), end)

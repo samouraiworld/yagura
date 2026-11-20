@@ -348,14 +348,19 @@ sum by (billing_period, category) (yagura_scaleway_monthly_consumption_amount{pr
   every invoice whose `billing_period` falls in a closed month of the window.
   Discounts exist only per invoice, never per project. A month without an
   invoice, such as the current month, has no invoice series.
-- **Names:** a project gets one `project_name` for every month: the latest
-  name seen in the history, ignoring a name equal to the project ID. The
+- **Names:** a project gets one `project_name` for every month: its name in
+  the most recent month where it has one, ignoring a name equal to the
+  project ID. The billing rows carry no rename date, so when a project has
+  two names within that month, the alphabetically smallest is used. The
   billing API names a deleted project by its ID; a project never seen with
   another name keeps its ID as `project_name` and `project`. `project` follows
   the [business project rule](#business-projects) at scrape time, so a mapping
   set through the API applies to every month at the next scrape.
 - **Errors:** an empty list (a month before the first bill) is a success
-  with no amount series. A failed read keeps the stored values (never 0), logs
+  with no amount series. A closed month's read fails when a row has no
+  amount or currency, when the data changes between pages, or when a page is
+  empty before the announced total. Just after the month change, an answer
+  last updated before the month began is not taken as the new month. A failed read keeps the stored values (never 0), logs
   one error line and is retried an hour later; until it succeeds the
   `scaleway_history` poll counts as failed in `yagura_collector_up`. A month
   never read with success has no series.

@@ -65,7 +65,11 @@ func invoicePeriod(s string) (string, error) {
 // usable billing period or total_untaxed fails the read, and so does an empty
 // page before total_count: a sum without them would be wrong. A missing
 // total_discount counts as 0.
-func readInvoices(ctx context.Context, client *httpx.Client, organizationID string) ([]InvoiceAmount, error) {
+//
+// keep, when not nil, selects the billing periods to sum; an invoice of
+// another period is not checked further, so that an old malformed invoice
+// does not block the recent totals.
+func readInvoices(ctx context.Context, client *httpx.Client, organizationID string, keep func(period string) bool) ([]InvoiceAmount, error) {
 	sums := map[invoiceKey]total{}
 	seen := map[string]bool{}
 	for page := 1; page <= httpx.MaxPages; page++ {
@@ -91,7 +95,7 @@ func readInvoices(ctx context.Context, client *httpx.Client, organizationID stri
 				continue
 			}
 			seen[inv.ID] = true
-			if err := addInvoice(sums, inv); err != nil {
+			if err := addInvoice(sums, inv, keep); err != nil {
 				return nil, fmt.Errorf("scaleway invoices: invoice %s: %w", capped(inv.ID), err)
 			}
 		}
@@ -107,10 +111,13 @@ func readInvoices(ctx context.Context, client *httpx.Client, organizationID stri
 	return nil, fmt.Errorf("scaleway invoices: still incomplete after %d pages", httpx.MaxPages)
 }
 
-func addInvoice(sums map[invoiceKey]total, inv invoice) error {
+func addInvoice(sums map[invoiceKey]total, inv invoice, keep func(string) bool) error {
 	period, err := invoicePeriod(inv.BillingPeriod)
 	if err != nil {
 		return err
+	}
+	if keep != nil && !keep(period) {
+		return nil
 	}
 	untaxed := inv.TotalUntaxed
 	if untaxed == nil || untaxed.CurrencyCode == "" {

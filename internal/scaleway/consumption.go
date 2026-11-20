@@ -91,7 +91,7 @@ func (p *consumptionPoller) Poll(ctx context.Context) (poller.Result, error) {
 		return poller.Result{}, err
 	}
 	res := p.result(read.totals, read.updatedAt, read.itemErrors)
-	p.history.observeCurrent(start, p.history.clock(), read.totals)
+	p.history.observeCurrent(start, p.history.clock(), read.totals, read.updatedAt)
 	return res, nil
 }
 
@@ -106,7 +106,9 @@ type consumptionRead struct {
 // ("YYYY-MM"; empty means the current period) and sums the rows per project,
 // name, category and currency. It stops once total_count rows are read or on
 // an empty page; more than httpx.MaxPages pages fail the read. An empty list
-// is a success with no totals.
+// is a success with no totals. A closed month replaces its stored values, so
+// its read is strict: a row without amount or currency, an updated_at that
+// changes between pages, or an empty page before total_count fails it.
 func readConsumption(ctx context.Context, client *httpx.Client, organizationID, period string, logger *slog.Logger) (consumptionRead, error) {
 	prefix := "scaleway consumption"
 	if period != "" {
@@ -132,8 +134,13 @@ func readConsumption(ctx context.Context, client *httpx.Client, organizationID, 
 		}
 		if page == 1 {
 			read.updatedAt = resp.UpdatedAt
+		} else if period != "" && resp.UpdatedAt != read.updatedAt {
+			return consumptionRead{}, fmt.Errorf("%s: page %d: the data changed during the read", prefix, page)
 		}
 		for _, row := range resp.Consumptions {
+			if period != "" && (row.Value == nil || row.Value.CurrencyCode == "") {
+				return consumptionRead{}, fmt.Errorf("%s: page %d: a row has no value or currency", prefix, page)
+			}
 			if row.Value == nil || row.Value.CurrencyCode == "" {
 				logger.Warn("scaleway consumption row has no value or currency; row skipped",
 					"billing_period", period, "project_id", capped(row.ProjectID), "category", capped(row.CategoryName))
