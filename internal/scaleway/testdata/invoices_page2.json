@@ -1,0 +1,28 @@
+{
+  "invoices": [
+    {
+      "id": "inv-0002",
+      "billing_period": "2026-09-01T00:00:00Z",
+      "total_untaxed": {"currency_code": "EUR", "units": 400, "nanos": 0},
+      "total_discount": {"currency_code": "EUR", "units": -4, "nanos": -150000000},
+      "type": "periodic",
+      "state": "paid"
+    },
+    {
+      "id": "inv-0003",
+      "billing_period": "2026-09-01T00:00:00Z",
+      "total_untaxed": {"currency_code": "EUR", "units": 27, "nanos": 830000000},
+      "type": "purchase",
+      "state": "paid"
+    },
+    {
+      "id": "inv-0004",
+      "billing_period": "2026-11-01T00:00:00Z",
+      "total_untaxed": {"currency_code": "EUR", "units": 9, "nanos": 0},
+      "total_discount": {"currency_code": "EUR", "units": 0, "nanos": 0},
+      "type": "purchase",
+      "state": "issued"
+    }
+  ],
+  "total_count": 4
+}

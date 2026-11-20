@@ -66,9 +66,13 @@ func NormalizeProjectID(s string) (string, bool) {
 
 // AutoProject returns the business project of a Scaleway project by the
 // automatic rule: the name is cut at the first "-", trimmed, lowercased, and
-// its spaces become "-". An empty name, or a result that is not a valid
-// project name (accents, "_", tabs...), falls back to the project ID.
+// its spaces become "-". An empty name, a name equal to the project ID (the
+// billing API names a deleted project by its ID), or a result that is not a
+// valid project name (accents, "_", tabs...) falls back to the project ID.
 func AutoProject(name, projectID string) string {
+	if strings.EqualFold(strings.TrimSpace(name), projectID) {
+		return projectID
+	}
 	if i := strings.IndexByte(name, '-'); i >= 0 {
 		name = name[:i]
 	}

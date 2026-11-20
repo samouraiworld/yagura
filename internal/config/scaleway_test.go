@@ -53,6 +53,9 @@ func TestScalewayDefaults(t *testing.T) {
 	if s.Interval != time.Hour || s.OrganizationID != testOrganizationID {
 		t.Fatalf("unexpected defaults: %+v", s)
 	}
+	if s.HistoryMonths != 24 || s.HistoryInterval != 24*time.Hour {
+		t.Fatalf("unexpected history defaults: %+v", s)
+	}
 	if v, err := s.SecretKey.Read(); err != nil || v != "test-key" {
 		t.Fatalf("secret key: %q %v", v, err)
 	}
@@ -60,9 +63,11 @@ func TestScalewayDefaults(t *testing.T) {
 
 func TestScalewayOverrides(t *testing.T) {
 	c, err := Load(mapLookup(map[string]string{
-		"YAGURA_SCALEWAY_SECRET_KEY":      "test-key",
-		"YAGURA_SCALEWAY_ORGANIZATION_ID": " 0000000A-0000-0000-0000-00000000000b ",
-		"YAGURA_SCALEWAY_INTERVAL":        "3h",
+		"YAGURA_SCALEWAY_SECRET_KEY":       "test-key",
+		"YAGURA_SCALEWAY_ORGANIZATION_ID":  " 0000000A-0000-0000-0000-00000000000b ",
+		"YAGURA_SCALEWAY_INTERVAL":         "3h",
+		"YAGURA_SCALEWAY_HISTORY_MONTHS":   " 0 ",
+		"YAGURA_SCALEWAY_HISTORY_INTERVAL": "6h",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -72,6 +77,9 @@ func TestScalewayOverrides(t *testing.T) {
 	// filter must not depend on how the ID was typed.
 	if s.OrganizationID != "0000000a-0000-0000-0000-00000000000b" || s.Interval != 3*time.Hour {
 		t.Fatalf("unexpected config: %+v", s)
+	}
+	if s.HistoryMonths != 0 || s.HistoryInterval != 6*time.Hour {
+		t.Fatalf("unexpected history config: %+v", s)
 	}
 }
 
@@ -120,6 +128,31 @@ func TestScalewayValidation(t *testing.T) {
 			"YAGURA_SCALEWAY_ORGANIZATION_ID": testOrganizationID,
 			"YAGURA_SCALEWAY_INTERVAL":        "soon",
 		}, "YAGURA_SCALEWAY_INTERVAL"},
+		{"history months negative", map[string]string{
+			"YAGURA_SCALEWAY_SECRET_KEY":      "s3cretpw",
+			"YAGURA_SCALEWAY_ORGANIZATION_ID": testOrganizationID,
+			"YAGURA_SCALEWAY_HISTORY_MONTHS":  "-1",
+		}, "YAGURA_SCALEWAY_HISTORY_MONTHS: must be a whole number from 0 to 60"},
+		{"history months too large", map[string]string{
+			"YAGURA_SCALEWAY_SECRET_KEY":      "s3cretpw",
+			"YAGURA_SCALEWAY_ORGANIZATION_ID": testOrganizationID,
+			"YAGURA_SCALEWAY_HISTORY_MONTHS":  "61",
+		}, "YAGURA_SCALEWAY_HISTORY_MONTHS"},
+		{"history months not a number", map[string]string{
+			"YAGURA_SCALEWAY_SECRET_KEY":      "s3cretpw",
+			"YAGURA_SCALEWAY_ORGANIZATION_ID": testOrganizationID,
+			"YAGURA_SCALEWAY_HISTORY_MONTHS":  "s3cretpw",
+		}, "YAGURA_SCALEWAY_HISTORY_MONTHS"},
+		{"history interval under one hour", map[string]string{
+			"YAGURA_SCALEWAY_SECRET_KEY":       "s3cretpw",
+			"YAGURA_SCALEWAY_ORGANIZATION_ID":  testOrganizationID,
+			"YAGURA_SCALEWAY_HISTORY_INTERVAL": "59m",
+		}, "YAGURA_SCALEWAY_HISTORY_INTERVAL: must be at least 1h"},
+		{"history interval unparseable", map[string]string{
+			"YAGURA_SCALEWAY_SECRET_KEY":       "s3cretpw",
+			"YAGURA_SCALEWAY_ORGANIZATION_ID":  testOrganizationID,
+			"YAGURA_SCALEWAY_HISTORY_INTERVAL": "daily",
+		}, "YAGURA_SCALEWAY_HISTORY_INTERVAL"},
 	}
 	for _, tc := range bad {
 		t.Run(tc.name, func(t *testing.T) {

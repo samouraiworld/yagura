@@ -84,6 +84,11 @@ func TestAutoProject(t *testing.T) {
 		"acme_prod":             id,
 		"Tab\tName":             id,
 		strings.Repeat("a", 64): id,
+		// A deleted project is billed with its ID as name: the ID is kept
+		// whole, never cut at its first "-".
+		id:                  id,
+		" " + id + " ":      id,
+		strings.ToUpper(id): id,
 	}
 	for name, want := range cases {
 		if got := AutoProject(name, id); got != want {

@@ -305,8 +305,8 @@ func TestUnsetBudget(t *testing.T) {
 func TestProjects(t *testing.T) {
 	f := newFixture(t)
 	r := f.do(t, http.MethodGet, "/api/v1/projects", "", "")
-	want := `{"projects":[{"project_id":"` + idAcme + `","project_name":"acme-backups","project":"acme","mapping":"auto","in_billing":true},` +
-		`{"project_id":"` + idSuite + `","project_name":"Big Suite","project":"big-suite","mapping":"auto","in_billing":true}]}` + "\n"
+	want := `{"projects":[{"project_id":"` + idAcme + `","project_name":"acme-backups","project":"acme","mapping":"auto","in_billing":true,"in_history":false},` +
+		`{"project_id":"` + idSuite + `","project_name":"Big Suite","project":"big-suite","mapping":"auto","in_billing":true,"in_history":false}]}` + "\n"
 	if r.code != http.StatusOK || r.raw != want {
 		t.Fatalf("%d %s\nwant %s", r.code, r.raw, want)
 	}
@@ -325,7 +325,7 @@ func TestProjects(t *testing.T) {
 		t.Errorf("unseen project: %d %s", r.code, r.raw)
 	}
 	r = f.do(t, http.MethodGet, "/api/v1/projects", "", "")
-	if !strings.Contains(r.raw, `{"project_id":"`+idOther+`","project_name":"","project":"orbit","mapping":"manual","in_billing":false}`) {
+	if !strings.Contains(r.raw, `{"project_id":"`+idOther+`","project_name":"","project":"orbit","mapping":"manual","in_billing":false,"in_history":false}`) {
 		t.Errorf("list after set: %s", r.raw)
 	}
 
@@ -360,6 +360,81 @@ func TestProjects(t *testing.T) {
 		if !strings.Contains(logs, s) {
 			t.Errorf("log misses %q", s)
 		}
+	}
+}
+
+// A project seen only in the monthly history is listed and can be mapped
+// like a billed one; an unknown ID keeps the warning.
+func TestProjectsWithHistory(t *testing.T) {
+	const (
+		idOld     = "00000000-0000-0000-0000-0000000000a1"
+		idDeleted = "00000000-0000-0000-0000-0000000000d1"
+	)
+	f := newFixture(t)
+	history := []scaleway.Project{{ID: idAcme, Name: "acme-backups"}, {ID: idOld, Name: "Old Tools"}, {ID: idDeleted, Name: idDeleted}}
+	f.h = Handler(Options{
+		Store: f.store,
+		Projects: func() []scaleway.Project {
+			return []scaleway.Project{{ID: idAcme, Name: "acme-backups"}, {ID: idSuite, Name: "Big Suite"}}
+		},
+		History: func() []scaleway.Project { return history },
+		Token:   func() (string, error) { return f.token, nil },
+		Logger:  slog.New(slog.DiscardHandler),
+	})
+	r := f.do(t, http.MethodGet, "/api/v1/projects", "", "")
+	want := `{"projects":[` +
+		`{"project_id":"` + idDeleted + `","project_name":"` + idDeleted + `","project":"` + idDeleted + `","mapping":"auto","in_billing":false,"in_history":true},` +
+		`{"project_id":"` + idAcme + `","project_name":"acme-backups","project":"acme","mapping":"auto","in_billing":true,"in_history":true},` +
+		`{"project_id":"` + idSuite + `","project_name":"Big Suite","project":"big-suite","mapping":"auto","in_billing":true,"in_history":false},` +
+		`{"project_id":"` + idOld + `","project_name":"Old Tools","project":"old-tools","mapping":"auto","in_billing":false,"in_history":true}]}` + "\n"
+	if r.code != http.StatusOK || r.raw != want {
+		t.Fatalf("%d %s\nwant %s", r.code, r.raw, want)
+	}
+
+	r = f.do(t, http.MethodPost, "/api/v1/projects/set?project_id="+idOld+"&project=tools", "", "")
+	wantSet := map[string]any{
+		"action": "project_set", "project_id": idOld, "project_name": "Old Tools",
+		"old_project": "old-tools", "old_mapping": "auto", "new_project": "tools", "new_mapping": "manual",
+		"message": "Scaleway project Old Tools now maps to tools (was old-tools, auto)", "warnings": []any{},
+	}
+	if r.code != http.StatusOK || mustJSON(t, r.body) != mustJSON(t, wantSet) {
+		t.Fatalf("set history project: %d %s", r.code, r.raw)
+	}
+	r = f.do(t, http.MethodPost, "/api/v1/projects/set?project_id="+idDeleted+"&project=legacy", "", "")
+	if r.code != http.StatusOK || r.body["old_project"] != idDeleted || len(r.body["warnings"].([]any)) != 0 {
+		t.Fatalf("set deleted project: %d %s", r.code, r.raw)
+	}
+	r = f.do(t, http.MethodGet, "/api/v1/projects", "", "")
+	if !strings.Contains(r.raw, `{"project_id":"`+idOld+`","project_name":"Old Tools","project":"tools","mapping":"manual","in_billing":false,"in_history":true}`) {
+		t.Errorf("list after set: %s", r.raw)
+	}
+	r = f.do(t, http.MethodPost, "/api/v1/projects/unset?project_id="+idOld, "", "")
+	if r.code != http.StatusOK || r.body["new_project"] != "old-tools" || r.body["new_mapping"] != "auto" {
+		t.Errorf("unset history project: %d %s", r.code, r.raw)
+	}
+	r = f.do(t, http.MethodPost, "/api/v1/projects/set?project_id="+idOther+"&project=orbit", "", "")
+	if r.code != http.StatusOK || r.body["old_project"] != nil || len(r.body["warnings"].([]any)) != 1 {
+		t.Errorf("unknown project: %d %s", r.code, r.raw)
+	}
+}
+
+// Grafana's buttons send an extra empty parameter, ignored=. Unknown
+// parameters are ignored, whatever their value and wherever they come from.
+func TestSetBudgetIgnoresUnknownEmptyParameter(t *testing.T) {
+	cases := []struct{ name, target, contentType, body string }{
+		{"query", "/api/v1/budgets/set?scope=total&amount=300&ignored=", "", ""},
+		{"query on a form body", "/api/v1/budgets/set?ignored=", "application/x-www-form-urlencoded", "scope=total&amount=300"},
+		{"form", "/api/v1/budgets/set", "application/x-www-form-urlencoded", "scope=total&amount=300&ignored="},
+		{"json", "/api/v1/budgets/set", "application/json", `{"scope":"total","amount":"300","ignored":""}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixture(t)
+			r := f.do(t, http.MethodPost, c.target, c.contentType, c.body)
+			if r.code != http.StatusOK || r.body["new_amount"] != 300.0 {
+				t.Fatalf("%d %s", r.code, r.raw)
+			}
+		})
 	}
 }
 

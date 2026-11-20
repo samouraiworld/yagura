@@ -1,0 +1,30 @@
+{
+  "consumptions": [
+    {
+      "value": {
+        "currency_code": "EUR",
+        "units": 0,
+        "nanos": 0
+      },
+      "product_name": "demo-registry",
+      "sku": "demo/sku/4",
+      "project_id": "0000000b-0000-0000-0000-000000000002",
+      "project_name": "Acme",
+      "category_name": "Containers"
+    },
+    {
+      "value": {
+        "currency_code": "EUR",
+        "units": 0,
+        "nanos": 10000000
+      },
+      "product_name": "demo-function",
+      "sku": "demo/sku/5",
+      "project_id": "0000000e-0000-0000-0000-000000000005",
+      "project_name": "0000000e-0000-0000-0000-000000000005",
+      "category_name": "Serverless"
+    }
+  ],
+  "total_count": 5,
+  "updated_at": "2026-10-01T06:00:00Z"
+}

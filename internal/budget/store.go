@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/samouraiworld/yagura/internal/statefile"
 )
 
 const (
@@ -26,6 +28,7 @@ const (
 
 	fileVersion  = 1
 	maxFileBytes = 1 << 20
+	tempPattern  = ".budgets-*.tmp"
 )
 
 var (
@@ -120,7 +123,7 @@ func Open(opts Options) (*Store, error) {
 	if s.now == nil {
 		s.now = time.Now
 	}
-	removeLeftovers(opts.Dir, logger)
+	statefile.RemoveLeftovers(opts.Dir, []string{tempPattern, statefile.ProbePattern}, logger)
 	seeded := opts.InitialTotal > 0 || opts.InitialScaleway > 0
 
 	switch st, err := load(s.path); {
@@ -158,8 +161,8 @@ func Open(opts Options) (*Store, error) {
 		logger.Info("budget seeds ignored: the store already exists", "path", s.path)
 	}
 	if opts.RequireWritable {
-		if err := probeWritable(opts.Dir); err != nil {
-			return nil, err
+		if err := statefile.ProbeWritable(opts.Dir); err != nil {
+			return nil, fmt.Errorf("budget store: %w", err)
 		}
 	}
 	return s, nil
@@ -167,29 +170,12 @@ func Open(opts Options) (*Store, error) {
 
 // load reads and validates the store file.
 func load(path string) (state, error) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return state{}, err
-		}
-		return state{}, fmt.Errorf("budget store: %w", err)
+	data, err := statefile.ReadRegular(path, maxFileBytes)
+	if errors.Is(err, fs.ErrNotExist) {
+		return state{}, err
 	}
-	// A symlink, FIFO or device is refused: a FIFO would block startup and
-	// a symlink would read a file outside the state directory.
-	if !info.Mode().IsRegular() {
-		return state{}, fmt.Errorf("budget store: %s is not a regular file", path)
-	}
-	f, err := os.Open(path) //nolint:gosec // G304: the path is the operator's state directory
 	if err != nil {
 		return state{}, fmt.Errorf("budget store: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(io.LimitReader(f, maxFileBytes+1))
-	if err != nil {
-		return state{}, fmt.Errorf("budget store: %w", err)
-	}
-	if len(data) > maxFileBytes {
-		return state{}, fmt.Errorf("budget store: %s is larger than %d KiB", path, maxFileBytes>>10)
 	}
 	var st state
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -207,19 +193,6 @@ func load(path string) (state, error) {
 	}
 	st.sort()
 	return st, nil
-}
-
-// removeLeftovers removes temporary files that a crash during a save or a
-// probe may have left in dir. It is best effort: the store works without it.
-func removeLeftovers(dir string, logger *slog.Logger) {
-	for _, pattern := range []string{".budgets-*.tmp", ".probe-*"} {
-		matches, _ := filepath.Glob(filepath.Join(dir, pattern))
-		for _, m := range matches {
-			if err := os.Remove(m); err != nil {
-				logger.Warn("budget store: cannot remove a leftover temporary file", "path", m, "error", err)
-			}
-		}
-	}
 }
 
 // sort orders the entries the way the file and the API list them.
@@ -269,23 +242,7 @@ func (st state) validate() error {
 	return nil
 }
 
-// probeWritable creates and removes a temporary file in dir.
-func probeWritable(dir string) error {
-	f, err := os.CreateTemp(dir, ".probe-*")
-	if err != nil {
-		return fmt.Errorf("budget store: state directory is not writable: %w", err)
-	}
-	name := f.Name()
-	_ = f.Close()
-	if err := os.Remove(name); err != nil {
-		return fmt.Errorf("budget store: %w", err)
-	}
-	return nil
-}
-
-// save writes st atomically: a temporary file in the same directory is
-// written, synced and renamed over the store file, then the directory is
-// synced so that the rename survives a crash.
+// save writes st atomically (see statefile.WriteAtomic).
 func (s *Store) save(st state) error {
 	st.sort()
 	if st.Budgets == nil {
@@ -298,45 +255,8 @@ func (s *Store) save(st state) error {
 	if err != nil {
 		return fmt.Errorf("budget store: %w", err)
 	}
-	data = append(data, '\n')
-	dir := filepath.Dir(s.path)
-	f, err := os.CreateTemp(dir, ".budgets-*.tmp")
-	if err != nil {
+	if err := statefile.WriteAtomic(s.path, tempPattern, append(data, '\n'), s.logger); err != nil {
 		return fmt.Errorf("budget store: %w", err)
-	}
-	tmp := f.Name()
-	ok := false
-	defer func() {
-		if !ok {
-			_ = f.Close()
-			_ = os.Remove(tmp)
-		}
-	}()
-	if err := f.Chmod(0o600); err != nil {
-		return fmt.Errorf("budget store: %w", err)
-	}
-	if _, err := f.Write(data); err != nil {
-		return fmt.Errorf("budget store: %w", err)
-	}
-	if err := f.Sync(); err != nil {
-		return fmt.Errorf("budget store: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("budget store: %w", err)
-	}
-	if err := os.Rename(tmp, s.path); err != nil {
-		return fmt.Errorf("budget store: %w", err)
-	}
-	ok = true
-	// The change is saved; a failed directory sync only weakens its
-	// durability after a crash, so it is logged, not returned.
-	d, err := os.Open(dir) //nolint:gosec // G304: the operator's state directory
-	if err == nil {
-		err = d.Sync()
-		_ = d.Close()
-	}
-	if err != nil {
-		s.logger.Warn("budget store: cannot sync the state directory after a save", "error", err)
 	}
 	return nil
 }

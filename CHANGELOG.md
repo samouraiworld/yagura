@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Scaleway monthly history: `yagura_scaleway_monthly_consumption_amount{billing_period, project_id, project_name, project, category, currency}`
+  for the current month and the last closed months,
+  `yagura_scaleway_invoice_amount{billing_period, kind, currency}` (sum of the
+  invoices' `total_untaxed` and `total_discount`) and
+  `yagura_scaleway_monthly_last_success_timestamp_seconds{billing_period}`.
+  Closed months and invoices are read by the new `scaleway_history` poller and
+  kept in `YAGURA_STATE_DIR/scaleway-history.json`. New settings
+  `YAGURA_SCALEWAY_HISTORY_MONTHS` (default 24, 0 turns it off) and
+  `YAGURA_SCALEWAY_HISTORY_INTERVAL` (default 24h).
+- `GET /api/v1/projects` also lists the projects seen only in the monthly
+  history, with a new `in_history` field; `POST /api/v1/projects/set` and
+  `unset` treat them like projects of the current month.
+
+### Fixed
+
+- The automatic business project rule keeps a deleted project's ID whole
+  (the billing API names such a project by its ID) instead of cutting it at
+  its first `-`; this changes `project` in `yagura_scaleway_project_info` for
+  such projects.
+
 ## [0.6.0] - 2026-11-20
 
 ### Added
