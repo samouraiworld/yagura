@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Monthly budgets stored by yagura in `YAGURA_STATE_DIR/budgets.json`, with
+  optional initial values (`YAGURA_BUDGET_INITIAL_TOTAL`,
+  `YAGURA_BUDGET_INITIAL_SCALEWAY`) applied once, and the metric
+  `yagura_budget_amount{scope, project, currency}`.
+- `yagura_scaleway_project_info{project_id, project_name, project, mapping}`:
+  the business project of each Scaleway project seen in billing, by an
+  automatic name rule or a manual mapping.
+- Optional budget write API on its own listener (`YAGURA_API_LISTEN_ADDRESS`),
+  protected by a bearer token (`YAGURA_API_TOKEN` or `YAGURA_API_TOKEN_FILE`):
+  list and change budgets and manual project mappings. Off by default.
+
 ## [0.5.1] - 2026-11-16
 
 ### Fixed

@@ -26,12 +26,14 @@ type consumptionPoller struct {
 	organizationID string
 	interval       time.Duration
 	logger         *slog.Logger
+	catalog        *Catalog
 }
 
 // NewConsumptionPoller returns the poller of the organization's month-to-date
-// consumption, named "scaleway_consumption".
-func NewConsumptionPoller(client *httpx.Client, organizationID string, interval time.Duration, logger *slog.Logger) poller.Poller {
-	return &consumptionPoller{client: client, organizationID: organizationID, interval: interval, logger: logger}
+// consumption, named "scaleway_consumption". Each successful poll replaces
+// the projects of catalog, which may be nil.
+func NewConsumptionPoller(client *httpx.Client, organizationID string, interval time.Duration, logger *slog.Logger, catalog *Catalog) poller.Poller {
+	return &consumptionPoller{client: client, organizationID: organizationID, interval: interval, logger: logger, catalog: catalog}
 }
 
 func (p *consumptionPoller) Name() string            { return "scaleway_consumption" }
@@ -125,7 +127,9 @@ func (p *consumptionPoller) Poll(ctx context.Context) (poller.Result, error) {
 
 func (p *consumptionPoller) result(totals map[groupKey]total, updatedAt string, itemErrors int) poller.Result {
 	metrics := make([]prometheus.Metric, 0, len(totals)+1)
+	keys := make([]groupKey, 0, len(totals))
 	for k, t := range totals {
+		keys = append(keys, k)
 		// Label values come from encoding/json, which yields valid UTF-8.
 		metrics = append(metrics, prometheus.MustNewConstMetric(amountDesc, prometheus.GaugeValue,
 			t.amount(), k.projectID, k.projectName, k.category, k.currency))
@@ -141,6 +145,7 @@ func (p *consumptionPoller) result(totals map[groupKey]total, updatedAt string, 
 		metrics = append(metrics, prometheus.MustNewConstMetric(updatedDesc, prometheus.GaugeValue,
 			float64(ts.UnixNano())/1e9))
 	}
+	p.catalog.set(keys)
 	return poller.Result{Metrics: metrics, ItemErrors: itemErrors}
 }
 

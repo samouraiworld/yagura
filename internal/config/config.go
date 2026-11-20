@@ -17,6 +17,8 @@ type Config struct {
 	Scaleway      *ScalewayConfig // nil when YAGURA_SCALEWAY_SECRET_KEY is unset
 	Supabase      *SupabaseConfig // nil when YAGURA_SUPABASE_TOKEN is unset
 	Netlify       *NetlifyConfig  // nil when YAGURA_NETLIFY_TOKEN is unset
+	Budget        *BudgetConfig   // nil when YAGURA_STATE_DIR is unset
+	API           *APIConfig      // nil when YAGURA_API_LISTEN_ADDRESS is unset
 }
 
 // Load builds the configuration from lookup, validating every value.
@@ -65,6 +67,12 @@ func Load(lookup LookupFunc) (*Config, error) {
 	}
 	if c.Netlify, err = loadNetlify(lookup); err != nil {
 		return nil, err
+	}
+	if c.Budget, c.API, err = loadBudget(lookup); err != nil {
+		return nil, err
+	}
+	if c.API != nil && c.API.ListenAddress == c.ListenAddress {
+		return nil, errors.New("YAGURA_API_LISTEN_ADDRESS: must differ from YAGURA_LISTEN_ADDRESS")
 	}
 	return c, nil
 }

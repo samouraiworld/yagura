@@ -4,5 +4,6 @@
 yagura
 dist
 secrets
+state
 .env.*
 .superpowers

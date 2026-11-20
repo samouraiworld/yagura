@@ -29,3 +29,32 @@ services:
     # secrets:
     #   gandi_token:
     #     file: ./secrets/gandi_token
+    #
+    # Example: budgets and the budget write API (both optional, see the
+    # README). The state directory must survive upgrades and be writable by
+    # UID 65532, for example a host directory prepared with
+    # `mkdir -m 0700 state && sudo chown 65532:65532 state`; it is ignored by
+    # git and left out of the Docker build context. Inside the container the
+    # API listens on all interfaces so that Docker can forward to it; publish
+    # it on 127.0.0.1 only and never route it from the Internet. The token
+    # file (at least 32 characters, `openssl rand -hex 32`) must be readable
+    # by UID 65532, like the token above.
+    #
+    # ports:
+    #   - "10100:10100"
+    #   - "127.0.0.1:10101:10101"
+    # volumes:
+    #   - ./state:/var/lib/yagura
+    # environment:
+    #   YAGURA_STATE_DIR: /var/lib/yagura
+    #   YAGURA_BUDGET_INITIAL_TOTAL: "100"
+    #   YAGURA_BUDGET_INITIAL_SCALEWAY: "100"
+    #   YAGURA_API_LISTEN_ADDRESS: ":10101"
+    #   YAGURA_API_TOKEN_FILE: /run/secrets/api_token
+    # secrets:
+    #   - api_token
+    #
+    # Top-level section:
+    # secrets:
+    #   api_token:
+    #     file: ./secrets/api_token
