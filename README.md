@@ -308,7 +308,8 @@ organization. If the poller fails and `yagura_api_requests_total` shows code
 `403` for `scaleway`, check the policy and its scope.
 
 With this collector on, `/metrics` shows the organization's project names and
-IDs and what each one has cost this month. Turn on the web config (TLS, basic
+IDs and what each one has cost this month and, with the monthly history, in
+each past month of the window, with the invoiced totals and discounts. Turn on the web config (TLS, basic
 auth) or keep the port reachable only by your Prometheus server.
 
 The `YaguraMonthlyCostOverBudget` alert fires when the month-to-date total of
@@ -362,10 +363,16 @@ sum by (billing_period, category) (yagura_scaleway_monthly_consumption_amount{pr
   month was last read, empty months included.
 - **Storage:** with `YAGURA_STATE_DIR` set, the months, the invoice totals
   and the last success times are saved to `scaleway-history.json` (mode 0600,
-  replaced atomically). At startup the stored months are exposed at once and
-  only due months are read. An unreadable or corrupt file stops the startup;
-  delete it to read the whole history again. Without `YAGURA_STATE_DIR` the
-  history is kept in memory and read again in full after each restart.
+  replaced atomically, at most 32 MiB: a larger history is kept in memory and
+  not saved, with an error). At startup the stored months are exposed at once
+  and only due months are read. An unreadable or corrupt file stops the
+  startup; delete it to read the whole history again. Without
+  `YAGURA_STATE_DIR`, or when the directory is not writable (a warning is
+  logged), the history is kept in memory and read again in full after each
+  restart.
+- **Late corrections:** a month read just after it ended is read again one
+  interval later, so a correction Scaleway makes in the first days of the
+  next month shows within `YAGURA_SCALEWAY_HISTORY_INTERVAL`.
 
 Series: one per month, project, category and currency (about 25 per month on
 an organization with 20 projects, so about 650 for 25 months), 2 invoice series
@@ -695,8 +702,10 @@ budgets cover Scaleway only.
 
 ### Storage
 
-Set `YAGURA_STATE_DIR` to an existing directory. yagura keeps one file there,
-`budgets.json` (mode 0600), and rewrites it atomically on each change (temporary
+Set `YAGURA_STATE_DIR` to an existing directory. yagura keeps the budgets
+there in `budgets.json` (mode 0600), and the
+[Scaleway monthly history](#monthly-history) in `scaleway-history.json`. It
+rewrites `budgets.json` atomically on each change (temporary
 file in the same directory, fsync, rename). On first start, when the file does
 not exist, yagura creates it with the budgets of `YAGURA_BUDGET_INITIAL_TOTAL`
 and `YAGURA_BUDGET_INITIAL_SCALEWAY` (each optional; no amount is set by
@@ -871,7 +880,9 @@ values (see [Budgets and write API](#budgets-and-write-api)).
   this on every request. When an HTTPS proxy is configured, the transport
   opens a `CONNECT` tunnel to that proxy.
 - The optional budget write API changes only yagura's own local budget file,
-  never anything at a provider. It is off by default, listens apart from
+  never anything at a provider. With `YAGURA_STATE_DIR` set and the Scaleway
+  collector on, the monthly billing history is also stored there
+  (`scaleway-history.json`, mode 0600). It is off by default, listens apart from
   `/metrics`, needs a bearer token compared in constant time, and must stay on
   loopback or an internal network.
 - Requests go to the provider APIs you configure. By default yagura also

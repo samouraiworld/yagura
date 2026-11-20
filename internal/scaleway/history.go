@@ -25,7 +25,6 @@ const (
 	HistoryFileName = "scaleway-history.json"
 
 	historyVersion     = 1
-	historyMaxBytes    = 8 << 20
 	historyTempPattern = ".scaleway-history-*.tmp"
 	periodLayout       = "2006-01"
 	// retryAfter is how long a failed read waits before it is tried again.
@@ -33,6 +32,10 @@ const (
 	// invoicesKey is the failure key of the invoice list.
 	invoicesKey = "invoices"
 )
+
+// historyMaxBytes caps the history file, at load and at save; a var so that
+// tests can lower it.
+var historyMaxBytes = 32 << 20
 
 // Line is the consumption of one project, category and currency in a
 // billing period. ProjectName is the name the billing API gave the project
@@ -149,15 +152,19 @@ func OpenHistory(opts HistoryOptions) (*History, error) {
 			h.logger.Warn("scaleway history: the file is readable or writable by group or others; expected 0600", "path", h.path)
 		}
 	}
+	// A read-only state directory is accepted, as for the budget store
+	// with the API off: the stored months are exposed, nothing is saved.
 	if err := statefile.ProbeWritable(opts.Dir); err != nil {
-		return nil, fmt.Errorf("scaleway history: %w", err)
+		h.logger.Warn("scaleway history: the state directory is not writable; the history is kept in memory only and read again after each restart",
+			"path", opts.Dir, "error", err)
+		h.path = ""
 	}
 	h.prune(h.now())
 	return h, nil
 }
 
 func loadHistory(path string) (historyFile, error) {
-	data, err := statefile.ReadRegular(path, historyMaxBytes)
+	data, err := statefile.ReadRegular(path, int64(historyMaxBytes))
 	if errors.Is(err, fs.ErrNotExist) {
 		return historyFile{}, err
 	}
@@ -186,6 +193,9 @@ func validPeriod(p string) bool {
 
 func validAmount(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
 
+// validTime refuses a zero time and years whose Unix nanoseconds overflow.
+func validTime(t time.Time) bool { return t.Year() >= 2000 && t.Year() <= 2200 }
+
 // validate refuses what would break the exposition (duplicate series,
 // invalid periods) or silently lose data (unknown version).
 func (f historyFile) validate() error {
@@ -201,8 +211,8 @@ func (f historyFile) validate() error {
 			return fmt.Errorf("month %s appears twice", m.BillingPeriod)
 		}
 		periods[m.BillingPeriod] = true
-		if m.LastSuccess.IsZero() {
-			return fmt.Errorf("month %s has no last_success", m.BillingPeriod)
+		if !validTime(m.LastSuccess) {
+			return fmt.Errorf("month %s has no valid last_success", m.BillingPeriod)
 		}
 		lines := map[lineKey]bool{}
 		for _, l := range m.Lines {
@@ -231,6 +241,9 @@ func (f historyFile) validate() error {
 	}
 	if len(f.Invoices.Amounts) > 0 && f.Invoices.LastSuccess.IsZero() {
 		return errors.New("invoices: amounts without last_success")
+	}
+	if !f.Invoices.LastSuccess.IsZero() && !validTime(f.Invoices.LastSuccess) {
+		return errors.New("invoices: invalid last_success")
 	}
 	return nil
 }
@@ -315,7 +328,8 @@ func (h *History) retryWait(key string, now time.Time) bool {
 // due returns the closed months to read, newest first, and whether the
 // invoice list is due. A closed month is due when it was never read, was last
 // read before it ended (not final yet), or was last read Interval ago or
-// more; a failed read waits retryAfter.
+// more; a failed read waits retryAfter. A last success in the future (clock
+// change) makes the read due, so that it cannot be postponed.
 func (h *History) due(now time.Time) ([]string, bool) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -325,12 +339,12 @@ func (h *History) due(now time.Time) ([]string, bool) {
 			continue
 		}
 		rec, ok := h.records[p]
-		if !ok || rec.LastSuccess.Before(periodEnd(p)) || now.Sub(rec.LastSuccess) >= h.interval {
+		if !ok || rec.LastSuccess.Before(periodEnd(p)) || rec.LastSuccess.After(now) || now.Sub(rec.LastSuccess) >= h.interval {
 			months = append(months, p)
 		}
 	}
 	invoices := h.months > 0 && !h.retryWait(invoicesKey, now) &&
-		(h.invoices.LastSuccess.IsZero() || now.Sub(h.invoices.LastSuccess) >= h.interval)
+		(h.invoices.LastSuccess.IsZero() || h.invoices.LastSuccess.After(now) || now.Sub(h.invoices.LastSuccess) >= h.interval)
 	return months, invoices
 }
 
@@ -340,6 +354,22 @@ func (h *History) setMonth(p string, lines []Line, at time.Time) {
 	defer h.mu.Unlock()
 	h.records[p] = monthRecord{BillingPeriod: p, LastSuccess: at.UTC(), Lines: lines}
 	delete(h.failures, p)
+	h.rev++
+}
+
+// setCurrent stores a read of the current month. When its lines did not
+// change, only the in-memory last success moves: the file is not rewritten
+// at every consumption poll.
+func (h *History) setCurrent(p string, lines []Line, at time.Time) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	rec, ok := h.records[p]
+	if ok && slices.Equal(rec.Lines, lines) {
+		rec.LastSuccess = at.UTC()
+		h.records[p] = rec
+		return
+	}
+	h.records[p] = monthRecord{BillingPeriod: p, LastSuccess: at.UTC(), Lines: lines}
 	h.rev++
 }
 
@@ -390,7 +420,7 @@ func (h *History) observeCurrent(start, end time.Time, totals map[groupKey]total
 		return
 	}
 	h.prune(end)
-	h.setMonth(p, monthLines(totals), end)
+	h.setCurrent(p, monthLines(totals), end)
 	if err := h.save(); err != nil {
 		h.logger.Error("scaleway history: cannot save the history; kept in memory", "error", err)
 	}
@@ -408,6 +438,20 @@ func usableName(name, projectID string) bool {
 	return name != "" && !strings.EqualFold(name, projectID)
 }
 
+// betterName reports whether name should replace cur as the name of
+// project id within one month: a usable name beats an unusable one, a
+// non-empty name beats an empty one, then the smaller name wins, so that the
+// choice does not depend on the order of the API rows.
+func betterName(name, cur, id string) bool {
+	if nu, cu := usableName(name, id), usableName(cur, id); nu != cu {
+		return nu
+	}
+	if name == "" || cur == "" {
+		return cur == "" && name != ""
+	}
+	return name < cur
+}
+
 // monthLines sums one month's totals per project, category and currency.
 // A project with several names in the month (renamed) gets the smallest
 // usable one on all its lines, so that the choice does not depend on the
@@ -415,13 +459,7 @@ func usableName(name, projectID string) bool {
 func monthLines(totals map[groupKey]total) []Line {
 	names := map[string]string{}
 	for k := range totals {
-		cur, seen := names[k.projectID]
-		switch {
-		case !seen:
-			names[k.projectID] = k.projectName
-		case usableName(k.projectName, k.projectID) && (!usableName(cur, k.projectID) || k.projectName < cur):
-			names[k.projectID] = k.projectName
-		case !usableName(cur, k.projectID) && !usableName(k.projectName, k.projectID) && k.projectName < cur:
+		if cur, seen := names[k.projectID]; !seen || betterName(k.projectName, cur, k.projectID) {
 			names[k.projectID] = k.projectName
 		}
 	}
@@ -480,6 +518,11 @@ func (h *History) save() error {
 	if err != nil {
 		return fmt.Errorf("scaleway history: %w", err)
 	}
+	// A file over the load limit would stop the next start: keep the
+	// history in memory and the previous file instead.
+	if len(data)+1 > historyMaxBytes {
+		return fmt.Errorf("scaleway history: not saved: %d KiB is over the %d KiB limit of the history file", len(data)>>10, historyMaxBytes>>10)
+	}
 	if err := statefile.WriteAtomic(h.path, historyTempPattern, append(data, '\n'), h.logger); err != nil {
 		return fmt.Errorf("scaleway history: %w", err)
 	}
@@ -531,9 +574,9 @@ func (h *History) view(now time.Time) historyView {
 	return v
 }
 
-// Projects returns one entry per project ID of the window's months, with
-// the name the monthly metrics use, sorted by ID. It is safe on a nil
-// history, which lists nothing.
+// Projects returns one entry per non-empty project ID of the window's
+// months, with the name the monthly metrics use, sorted by ID. It is safe on
+// a nil history, which lists nothing.
 func (h *History) Projects() []Project {
 	if h == nil {
 		return nil
@@ -541,7 +584,9 @@ func (h *History) Projects() []Project {
 	v := h.view(h.now())
 	out := make([]Project, 0, len(v.names))
 	for id, name := range v.names {
-		out = append(out, Project{ID: id, Name: name})
+		if id != "" {
+			out = append(out, Project{ID: id, Name: name})
+		}
 	}
 	slices.SortFunc(out, func(a, b Project) int { return cmp.Compare(a.ID, b.ID) })
 	return out

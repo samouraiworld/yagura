@@ -253,16 +253,24 @@ func TestHistoryFailureKeepsStoredValues(t *testing.T) {
 	if _, err := poll(t, newHistoryPoller(t, bad.URL, h, io.Discard)); err == nil {
 		t.Error("poll succeeded while reads are still failing")
 	}
-	if n := testkit.Hits(bad, "GET "+histKey("2026-09", "1")); n == 0 || n > 2 {
-		t.Errorf("2026-09 attempts = %d", n)
+	if n := testkit.Hits(bad, "GET "+histKey("2026-09", "1")); n != 1 {
+		t.Errorf("2026-09 attempts after 30 minutes = %d, want 1 (no retry before an hour)", n)
 	}
-	before := testkit.Hits(bad, "GET "+histKey("2026-09", "1"))
-	if _, err := poll(t, newHistoryPoller(t, bad.URL, h, io.Discard)); err == nil || testkit.Hits(bad, "GET "+histKey("2026-09", "1")) != before {
-		t.Error("a failed month was retried before an hour")
+	if n := testkit.Hits(bad, "GET "+invKey("1")); n != 1 {
+		t.Errorf("invoice attempts after 30 minutes = %d, want 1", n)
 	}
 
-	// An hour after the failure, the retry succeeds and the poll too.
+	// An hour after the failure, the retry happens; it fails again here.
 	clock.Set(tNow.Add(26*time.Hour + time.Minute))
+	if _, err := poll(t, newHistoryPoller(t, bad.URL, h, io.Discard)); err == nil {
+		t.Error("poll succeeded while reads are still failing")
+	}
+	if n := testkit.Hits(bad, "GET "+histKey("2026-09", "1")); n != 2 {
+		t.Errorf("2026-09 attempts after an hour = %d, want 2", n)
+	}
+
+	// The next retry succeeds, and the poll too.
+	clock.Set(tNow.Add(27*time.Hour + 2*time.Minute))
 	if _, err := poll(t, newHistoryPoller(t, srv.URL, h, io.Discard)); err != nil {
 		t.Fatalf("retry: %v", err)
 	}
@@ -438,13 +446,33 @@ func TestOpenHistoryErrors(t *testing.T) {
 			t.Skip("root ignores directory permissions")
 		}
 		dir := t.TempDir()
+		t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // G302: restore the directory
+		writeHistoryFile(t, dir, ok)
 		if err := os.Chmod(dir, 0o500); err != nil { //nolint:gosec // G302: a read-only directory, on purpose
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // G302: restore the directory
-		if _, err := OpenHistory(HistoryOptions{Dir: dir, Months: 3, Interval: time.Hour}); err == nil ||
-			!strings.Contains(err.Error(), "not writable") {
-			t.Fatalf("read-only directory: %v", err)
+		logs := &bytes.Buffer{}
+		h, err := OpenHistory(HistoryOptions{Dir: dir, Months: 3, Interval: time.Hour, Now: clock.Now,
+			Logger: slog.New(slog.NewTextHandler(logs, nil))})
+		if err != nil {
+			t.Fatalf("a read-only directory must not stop the start: %v", err)
+		}
+		if !strings.Contains(logs.String(), "not writable") {
+			t.Errorf("no warning: %s", logs)
+		}
+		if !strings.Contains(collectText(t, h), `billing_period="2026-10"`) {
+			t.Error("the stored months are not exposed")
+		}
+		h.setMonth("2026-09", nil, tNow)
+		if err := h.save(); err != nil {
+			t.Errorf("save in memory-only mode: %v", err)
+		}
+	})
+	t.Run("last_success out of range", func(t *testing.T) {
+		dir := t.TempDir()
+		writeHistoryFile(t, dir, strings.Replace(ok, `"2026-11-01T00:00:00Z"`, `"3000-01-01T00:00:00Z"`, 1))
+		if _, err := OpenHistory(HistoryOptions{Dir: dir, Months: 3, Interval: time.Hour, Now: clock.Now}); err == nil {
+			t.Fatal("want an error")
 		}
 	})
 }
@@ -522,5 +550,120 @@ func TestHistoryShutdownIsNotAFailure(t *testing.T) {
 	}
 	if got := h.failing(); len(got) != 0 {
 		t.Errorf("failing after shutdown = %v", got)
+	}
+}
+
+// An empty page before total_count is an incomplete answer: the stored
+// month is kept and the read fails.
+func TestHistoryEmptyPageBeforeTotalCount(t *testing.T) {
+	clock := &fakeClock{t: tNow}
+	h, _ := openHistory(t, "", clock, 3)
+	srv := testkit.NewServer(t, historyRoutes())
+	if _, err := poll(t, newHistoryPoller(t, srv.URL, h, io.Discard)); err != nil {
+		t.Fatal(err)
+	}
+	routes := historyRoutes()
+	routes[histKey("2026-09", "2")] = testkit.Route{Body: `{"consumptions":[],"total_count":5}`}
+	routes[invKey("2")] = testkit.Route{Body: `{"invoices":[],"total_count":4}`}
+	short := testkit.NewServer(t, routes)
+	clock.Set(tNow.Add(25 * time.Hour))
+	_, err := poll(t, newHistoryPoller(t, short.URL, h, io.Discard))
+	if err == nil || !strings.Contains(err.Error(), "2026-09") || !strings.Contains(err.Error(), "invoices") {
+		t.Fatalf("poll = %v, want 2026-09 and invoices failing", err)
+	}
+	text := collectText(t, h)
+	if !strings.Contains(text, HistoryMetricNames[0]+` billing_period="2026-09"`) || !strings.Contains(text, HistoryMetricNames[1]+` billing_period="2026-09"`) {
+		t.Errorf("stored 2026-09 values lost:\n%s", text)
+	}
+}
+
+func TestReadInvoicesRequiresID(t *testing.T) {
+	srv := testkit.NewServer(t, map[string]testkit.Route{invKey("1"): {Body: `{"invoices":[{"billing_period":"2026-09-01T00:00:00Z",` +
+		`"total_untaxed":{"currency_code":"EUR","units":1}}],"total_count":1}`}})
+	client := httpx.New(httpx.Options{Provider: "scaleway", BaseURL: srv.URL})
+	if _, err := readInvoices(context.Background(), client, tOrg); err == nil || !strings.Contains(err.Error(), "no id") {
+		t.Fatalf("readInvoices = %v, want an error for an invoice without id", err)
+	}
+}
+
+// The poll deadline stops the reads without marking a failure: the
+// remaining months stay due for the next check.
+func TestHistoryPollDeadlineIsNotAFailure(t *testing.T) {
+	clock := &fakeClock{t: tNow}
+	h, _ := openHistory(t, "", clock, 3)
+	srv := testkit.NewServer(t, historyRoutes())
+	// One request at once, the next one a second later: past the deadline.
+	client := httpx.New(httpx.Options{Provider: "scaleway", BaseURL: srv.URL, RateLimit: 1, Burst: 1})
+	p := NewHistoryPoller(client, tOrg, h, slog.New(slog.DiscardHandler))
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	_, err := p.Poll(ctx)
+	if err == nil || !strings.Contains(err.Error(), "deadline") {
+		t.Fatalf("Poll = %v, want a deadline error", err)
+	}
+	if got := h.failing(); len(got) != 0 {
+		t.Errorf("failing = %v, want none", got)
+	}
+	months, invoices := h.due(clock.Now())
+	if strings.Join(months, ",") != "2026-09,2026-08" || !invoices {
+		t.Errorf("due = %v, %v; want 2026-09,2026-08 and the invoices", months, invoices)
+	}
+}
+
+// A last success in the future (clock change) does not postpone the read.
+func TestHistoryFutureLastSuccessIsDue(t *testing.T) {
+	clock := &fakeClock{t: tNow}
+	h, _ := openHistory(t, "", clock, 1)
+	h.setMonth("2026-10", nil, tNow.Add(48*time.Hour))
+	h.setInvoices(nil, tNow.Add(48*time.Hour))
+	months, invoices := h.due(tNow)
+	if strings.Join(months, ",") != "2026-10" || !invoices {
+		t.Errorf("due = %v, %v", months, invoices)
+	}
+}
+
+// An unchanged current month does not rewrite the file; a save over the
+// size limit is refused and keeps the previous file.
+func TestHistorySaves(t *testing.T) {
+	dir := t.TempDir()
+	clock := &fakeClock{t: tNow}
+	h, _ := openHistory(t, dir, clock, 3)
+	totals := map[groupKey]total{{"0000000a-0000-0000-0000-000000000001", "Tools", "Compute", "EUR"}: {units: 1}}
+	h.observeCurrent(tNow, tNow, totals)
+	path := filepath.Join(dir, HistoryFileName)
+	first, err := os.ReadFile(path) //nolint:gosec // G304: a test directory
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock.Set(tNow.Add(time.Hour))
+	h.observeCurrent(tNow.Add(time.Hour), tNow.Add(time.Hour), totals)
+	if again, _ := os.ReadFile(path); string(again) != string(first) { //nolint:gosec // G304: a test directory
+		t.Error("an unchanged current month rewrote the file")
+	}
+	if !strings.Contains(collectText(t, h), `billing_period="2026-11"`) {
+		t.Error("current month missing")
+	}
+
+	old := historyMaxBytes
+	historyMaxBytes = len(first)
+	t.Cleanup(func() { historyMaxBytes = old })
+	h.setMonth("2026-10", []Line{{ProjectID: "p", ProjectName: "n", Category: "c", Currency: "EUR", Amount: 1}}, tNow)
+	if err := h.save(); err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Fatalf("save over the limit = %v", err)
+	}
+	if again, _ := os.ReadFile(path); string(again) != string(first) { //nolint:gosec // G304: a test directory
+		t.Error("a refused save changed the file")
+	}
+}
+
+func TestHistoryProjectsSkipEmptyID(t *testing.T) {
+	clock := &fakeClock{t: tNow}
+	h, _ := openHistory(t, "", clock, 3)
+	h.setMonth("2026-10", []Line{
+		{ProjectID: "", ProjectName: "", Category: "c", Currency: "EUR", Amount: 1},
+		{ProjectID: "p", ProjectName: "n", Category: "c", Currency: "EUR", Amount: 1},
+	}, tNow)
+	if got := h.Projects(); len(got) != 1 || got[0].ID != "p" {
+		t.Errorf("Projects = %v", got)
 	}
 }

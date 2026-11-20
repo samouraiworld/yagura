@@ -44,30 +44,36 @@ func (p *historyPoller) Poll(ctx context.Context) (poller.Result, error) {
 	h.prune(now)
 	months, invoices := h.due(now)
 	itemErrors := 0
+	// outOfTime is set when the poll deadline (or shutdown) stops a read:
+	// that is not a failure of the month, which stays due for the next check.
+	outOfTime := false
+	stopped := func(err error) bool {
+		return ctx.Err() != nil || errors.Is(err, httpx.ErrPollDeadline)
+	}
 	for _, period := range months {
 		read, err := readConsumption(ctx, p.client, p.organizationID, period, p.logger)
+		if err != nil && stopped(err) {
+			outOfTime = true
+			break
+		}
 		if err != nil {
-			if errors.Is(ctx.Err(), context.Canceled) {
-				break // shutdown: not a failure of this month
-			}
 			p.logger.Error("scaleway history: cannot read a month; stored values kept, retried in 1h",
 				"billing_period", period, "error", err)
 			h.fail(period, h.now())
-			if ctx.Err() != nil {
-				break // poll timeout: the other months stay due for the next check
-			}
 			continue
 		}
 		itemErrors += read.itemErrors
 		h.setMonth(period, monthLines(read.totals), h.now())
 	}
-	if invoices && ctx.Err() == nil {
-		if amounts, err := readInvoices(ctx, p.client, p.organizationID); err != nil {
-			if !errors.Is(ctx.Err(), context.Canceled) {
-				p.logger.Error("scaleway history: cannot read the invoices; stored values kept, retried in 1h", "error", err)
-				h.fail(invoicesKey, h.now())
-			}
-		} else {
+	if invoices && !outOfTime {
+		amounts, err := readInvoices(ctx, p.client, p.organizationID)
+		switch {
+		case err != nil && stopped(err):
+			outOfTime = true
+		case err != nil:
+			p.logger.Error("scaleway history: cannot read the invoices; stored values kept, retried in 1h", "error", err)
+			h.fail(invoicesKey, h.now())
+		default:
 			h.setInvoices(amounts, h.now())
 		}
 	}
@@ -76,6 +82,9 @@ func (p *historyPoller) Poll(ctx context.Context) (poller.Result, error) {
 	}
 	if err := ctx.Err(); err != nil {
 		return poller.Result{}, err
+	}
+	if outOfTime {
+		return poller.Result{}, errors.New("scaleway history: poll deadline reached; the remaining reads continue at the next check")
 	}
 	if failing := h.failing(); len(failing) > 0 {
 		return poller.Result{}, fmt.Errorf("scaleway history: last read failed for %s; retried hourly", strings.Join(failing, ", "))

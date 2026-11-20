@@ -147,6 +147,11 @@ func readConsumption(ctx context.Context, client *httpx.Client, organizationID, 
 			read.totals[k] = t
 		}
 		rows += len(resp.Consumptions)
+		// A closed month is stored in place of the previous read: an empty
+		// page before total_count is an incomplete answer, not the end.
+		if period != "" && len(resp.Consumptions) == 0 && resp.TotalCount != nil && rows < *resp.TotalCount {
+			return consumptionRead{}, fmt.Errorf("%s: page %d is empty after %d of %d rows", prefix, page, rows, *resp.TotalCount)
+		}
 		if len(resp.Consumptions) == 0 || (resp.TotalCount != nil && rows >= *resp.TotalCount) {
 			return read, nil
 		}

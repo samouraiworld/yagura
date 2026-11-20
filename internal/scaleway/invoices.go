@@ -61,9 +61,10 @@ func invoicePeriod(s string) (string, error) {
 // readInvoices lists every invoice of the organization, oldest number first
 // so that a new invoice does not shift the pages, and sums total_untaxed and
 // total_discount per billing period and currency, with the API's sign. An
-// invoice seen twice (same ID) counts once. An invoice without a usable
-// billing period or total_untaxed fails the read: a sum without it would be
-// wrong. A missing total_discount counts as 0.
+// invoice seen twice (same ID) counts once. An invoice without an ID, a
+// usable billing period or total_untaxed fails the read, and so does an empty
+// page before total_count: a sum without them would be wrong. A missing
+// total_discount counts as 0.
 func readInvoices(ctx context.Context, client *httpx.Client, organizationID string) ([]InvoiceAmount, error) {
 	sums := map[invoiceKey]total{}
 	seen := map[string]bool{}
@@ -83,17 +84,22 @@ func readInvoices(ctx context.Context, client *httpx.Client, organizationID stri
 			return nil, fmt.Errorf("scaleway invoices: page %d: missing \"invoices\" array", page)
 		}
 		for _, inv := range resp.Invoices {
-			if inv.ID != "" {
-				if seen[inv.ID] {
-					continue
-				}
-				seen[inv.ID] = true
+			// The ID de-duplicates an invoice that a shifted page returns twice.
+			if inv.ID == "" {
+				return nil, fmt.Errorf("scaleway invoices: page %d: an invoice has no id", page)
 			}
+			if seen[inv.ID] {
+				continue
+			}
+			seen[inv.ID] = true
 			if err := addInvoice(sums, inv); err != nil {
 				return nil, fmt.Errorf("scaleway invoices: invoice %s: %w", capped(inv.ID), err)
 			}
 		}
 		rows += len(resp.Invoices)
+		if len(resp.Invoices) == 0 && resp.TotalCount != nil && rows < *resp.TotalCount {
+			return nil, fmt.Errorf("scaleway invoices: page %d is empty after %d of %d invoices", page, rows, *resp.TotalCount)
+		}
 		if len(resp.Invoices) == 0 || (resp.TotalCount != nil && rows >= *resp.TotalCount) {
 			return invoiceAmounts(sums), nil
 		}

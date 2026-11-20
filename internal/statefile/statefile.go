@@ -32,6 +32,11 @@ func ReadRegular(path string, maxBytes int64) ([]byte, error) {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
+	// The file opened must be the regular file checked above, not one put
+	// in its place in between.
+	if opened, err := f.Stat(); err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+		return nil, fmt.Errorf("%s changed while it was opened", path)
+	}
 	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
 	if err != nil {
 		return nil, err
