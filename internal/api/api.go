@@ -233,6 +233,12 @@ func (h *handler) setBudget(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Budgets are kept in EUR only; another currency is refused rather
+	// than stored as EUR.
+	if c, has := p["currency"]; has && !strings.EqualFold(c, budget.Currency) {
+		writeError(w, http.StatusBadRequest, "currency must be "+budget.Currency)
+		return
+	}
 	text, has := p["amount"]
 	if !has {
 		writeError(w, http.StatusBadRequest, "amount is required")

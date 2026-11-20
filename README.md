@@ -677,10 +677,11 @@ yagura_scaleway_project_info{project_id="…", project_name="acme-backups", proj
 Budgets are read from the store at scrape time: a change shows at the next
 scrape, and an unset budget has no series. `yagura_scaleway_consumption_amount`
 has no `project` label; join it with `yagura_scaleway_project_info` on
-`project_id`, for example the month-to-date cost per business project:
+`project_id`, for example the month-to-date cost per business project (amounts
+in different currencies are never added together):
 
 ```promql
-sum by (project) (
+sum by (project, currency) (
   yagura_scaleway_consumption_amount
   * on (job, instance, project_id) group_left (project)
   yagura_scaleway_project_info
@@ -707,7 +708,7 @@ number or a string with a dot or a comma and at most two decimals (`300`,
 | Method and path | Parameters | Effect |
 |---|---|---|
 | `GET /api/v1/budgets` | none | List budgets: `scope`, `project`, `amount`, `currency`, `updated_at` |
-| `POST /api/v1/budgets/set` | `scope`, `project` when `scope=project`, `amount` | Create or change a budget |
+| `POST /api/v1/budgets/set` | `scope`, `project` when `scope=project`, `amount`, optional `currency` (`EUR` only) | Create or change a budget |
 | `POST /api/v1/budgets/unset` | `scope`, `project` when `scope=project` | Remove a budget |
 | `GET /api/v1/projects` | none | List Scaleway projects with `project`, `mapping` and `in_billing` |
 | `POST /api/v1/projects/set` | `project_id`, `project` | Map a Scaleway project manually |

@@ -182,6 +182,7 @@ func TestSetBudgetParameterSources(t *testing.T) {
 		{"sniffed json", "/api/v1/budgets/set", "", ` {"scope":"project","project":"acme","amount":"42"}`, 42},
 		{"sniffed form", "/api/v1/budgets/set", "text/plain", "scope=project&project=acme&amount=43", 43},
 		{"mixed same value", "/api/v1/budgets/set?scope=project", "application/json", `{"scope":"project","project":"acme","amount":7}`, 7},
+		{"currency EUR", "/api/v1/budgets/set?currency=eur", "application/json", `{"scope":"project","project":"acme","amount":9}`, 9},
 		{"spaces trimmed", "/api/v1/budgets/set", "application/json", `{"scope":" project ","project":" acme ","amount":" 8 "}`, 8},
 	}
 	for _, c := range cases {
@@ -240,6 +241,7 @@ func TestSetBudgetRejects(t *testing.T) {
 		code                      int
 	}{
 		"no amount":           {"/api/v1/budgets/set?scope=total", "", "", 400},
+		"other currency":      {"/api/v1/budgets/set?scope=total&amount=1&currency=USD", "", "", 400},
 		"zero":                {"/api/v1/budgets/set?scope=total&amount=0", "", "", 400},
 		"negative":            {"/api/v1/budgets/set?scope=total&amount=-1", "", "", 400},
 		"over cap":            {"/api/v1/budgets/set?scope=total&amount=100001", "", "", 400},

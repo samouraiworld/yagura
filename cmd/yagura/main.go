@@ -57,7 +57,8 @@ func run(ctx context.Context, lookup config.LookupFunc, stderr io.Writer) error 
 		projects = catalog.List
 	}
 	// The token and the API port are checked before the store is opened, so
-	// that a failed start does not create budgets.json with the seeds.
+	// that a bad token or a busy API port does not create budgets.json with
+	// the seeds.
 	var apiListener net.Listener
 	if a := cfg.API; a != nil {
 		if err := api.CheckToken(a.Token.Read); err != nil {
