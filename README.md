@@ -22,6 +22,8 @@ VictoriaMetrics setup can scrape it, graph it in Grafana and alert on it.
 - Poll-and-cache: scrapes never call a provider; `/metrics` reads memory.
 - Self-monitoring metrics for every poller, plus request and build metrics.
 - Configuration from environment variables only; secrets also accepted as files.
+- Optional monthly budgets per scope and business project, exposed as metrics
+  and editable through a small authenticated write API on its own listener.
 - Optional TLS and basic auth through the standard exporter-toolkit web config.
 - Example Grafana dashboard and Prometheus/vmalert alert rules.
 
@@ -53,6 +55,11 @@ when its credential variable (or its `_FILE` variant) is set.
 | `YAGURA_WEB_CONFIG_FILE` | empty | exporter-toolkit web config (TLS, basic auth) |
 | `YAGURA_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `YAGURA_LOG_FORMAT` | `logfmt` | `logfmt` or `json` |
+| `YAGURA_STATE_DIR` | empty | Existing directory holding `budgets.json`; enables budgets (see [Budgets and write API](#budgets-and-write-api)) |
+| `YAGURA_BUDGET_INITIAL_TOTAL` | empty | Initial `total` budget in EUR, applied once when `budgets.json` does not exist |
+| `YAGURA_BUDGET_INITIAL_SCALEWAY` | empty | Initial `scaleway` budget in EUR, applied once when `budgets.json` does not exist |
+| `YAGURA_API_LISTEN_ADDRESS` | empty | Listen address of the budget write API; empty keeps it off |
+| `YAGURA_API_TOKEN` | empty | Bearer token of the write API (secret, at least 32 characters) |
 
 Every secret variable `X` also accepts `X_FILE`, naming a file whose trimmed
 content is the secret (Docker and Kubernetes secrets). Setting both is a
@@ -85,6 +92,8 @@ Go runtime and process metrics are also exposed.
 | `yagura_gandi_prepaid_warning_threshold` | gauge | `currency` | Balance below which Gandi sends a warning (omitted if the account has no prepaid or no threshold set; omitted with an item error if it is not a number) |
 | `yagura_scaleway_consumption_amount` | gauge | `project_id`, `project_name`, `category`, `currency` | Consumption month to date, as reported by the Scaleway billing API; resets on the 1st |
 | `yagura_scaleway_consumption_updated_timestamp_seconds` | gauge | none | Unix time of the billing API's last consumption update (omitted if the API does not send a valid one) |
+| `yagura_scaleway_project_info` | gauge | `project_id`, `project_name`, `project`, `mapping` | Business project of each Scaleway project seen in the current month's billing data, always 1; `mapping` is `auto` or `manual` (see [Budgets](#budgets-and-write-api)) |
+| `yagura_budget_amount` | gauge | `scope`, `project`, `currency` | Monthly budget excluding VAT stored by yagura; `scope` is `total`, `scaleway` or `project` (`project` is empty unless `scope="project"`); an unset budget has no series |
 | `yagura_supabase_project_info` | gauge | `project_ref`, `project_name`, `organization_slug`, `region` | Always 1; carries the project's name, organization and region |
 | `yagura_supabase_project_status` | gauge | `project_ref`, `status` | State set: 1 for the project's current status, 0 for every other known status; an unknown status gets its own series with 1 |
 | `yagura_supabase_service_healthy` | gauge | `project_ref`, `service` | 1 if the service reports `ACTIVE_HEALTHY`, else 0; active projects only; 0 for every requested service when the project's health call fails |
@@ -613,6 +622,133 @@ the 10 latest production deploys of a site are all skipped builds,
 `yagura_netlify_last_deploy_failed` is 0 and the site's state and creation
 time are omitted. Any other deploy in the `error` state counts as failed.
 
+## Budgets and write API
+
+yagura can keep monthly budgets (EUR, excluding VAT) and expose them as
+metrics, so that dashboards and alert rules read one source instead of
+hard-coded thresholds. Budgets have a scope: `total` (all services),
+`scaleway` (Scaleway alone) or `project` (one business project). Per-project
+budgets cover Scaleway only.
+
+### Storage
+
+Set `YAGURA_STATE_DIR` to an existing directory. yagura keeps one file there,
+`budgets.json` (mode 0600), and rewrites it atomically on each change (temporary
+file in the same directory, fsync, rename). On first start, when the file does
+not exist, yagura creates it with the budgets of `YAGURA_BUDGET_INITIAL_TOTAL`
+and `YAGURA_BUDGET_INITIAL_SCALEWAY` (each optional; no amount is set by
+default). Later starts ignore those two variables. The directory must
+therefore be writable by yagura on the first start, and always while the API
+is on. A file that cannot be read or parsed, has an unknown key, or is not a
+regular file stops yagura at startup; it is never reset silently. yagura
+reads the file at startup only: stop it before editing the file by hand, or
+the next change through the API overwrites the edit. Only one yagura instance
+may use a state directory: run the store and the API on a single instance.
+
+With Docker, mount a host directory owned by the container user (UID 65532),
+as in the `docker-compose.yml` example. A named volume mounted on a path that
+does not exist in the image is created owned by root, and yagura cannot write
+to it.
+
+### Business projects
+
+Each Scaleway project seen in the current month's billing data belongs to a
+business project. The automatic rule takes the Scaleway project name, cuts it
+at the first `-`, trims it, lowercases it and replaces spaces with `-`:
+`acme-backups` and `Acme - prod` give `acme`, `Big Suite` gives `big-suite`. When the name is
+empty, or the result is not a valid project name (`^[a-z0-9][a-z0-9-]{0,62}$`,
+for example a name with an accent or `_`), the project ID is used instead. A
+manual mapping set through the API replaces the rule for one project ID.
+
+The project list comes from the billing data the Scaleway collector already
+reads: no other Scaleway call or permission is needed. A project with no
+consumption in the current month is therefore absent from the list and from
+`yagura_scaleway_project_info` until it has some. Early in a month the list
+can be short.
+
+### Metrics
+
+```
+yagura_budget_amount{scope="total", project="", currency="EUR"} 100
+yagura_budget_amount{scope="project", project="acme", currency="EUR"} 40
+yagura_scaleway_project_info{project_id="…", project_name="acme-backups", project="acme", mapping="auto"} 1
+```
+
+Budgets are read from the store at scrape time: a change shows at the next
+scrape, and an unset budget has no series. `yagura_scaleway_consumption_amount`
+has no `project` label; join it with `yagura_scaleway_project_info` on
+`project_id`, for example the month-to-date cost per business project (amounts
+in different currencies are never added together):
+
+```promql
+sum by (project, currency) (
+  yagura_scaleway_consumption_amount
+  * on (job, instance, project_id) group_left (project)
+  yagura_scaleway_project_info
+)
+```
+
+### Write API
+
+Off by default. Set `YAGURA_API_LISTEN_ADDRESS`, `YAGURA_STATE_DIR` and
+`YAGURA_API_TOKEN` (or `YAGURA_API_TOKEN_FILE`, re-read on every request) to
+turn it on; a missing piece is a startup error. The token must be random and
+at least 32 characters long: generate it with `openssl rand -hex 32`. The API has its own listener, without TLS: bind it to
+loopback or an internal network only, and never route it from the Internet.
+`/metrics` stays on `YAGURA_LISTEN_ADDRESS`.
+
+Every `/api/` request needs `Authorization: Bearer <token>`; without it the
+answer is 401 with no detail. Writes are `POST` only. Parameters are read from
+the query string, a JSON object body (`Content-Type: application/json`) or a
+form body (`application/x-www-form-urlencoded`); a body without a content type
+is read as JSON when it starts with `{`, as a form otherwise. An amount is a
+number or a string with a dot or a comma and at most two decimals (`300`,
+`"300.5"`, `"300,5"`), greater than 0 and at most 100000.
+
+| Method and path | Parameters | Effect |
+|---|---|---|
+| `GET /api/v1/budgets` | none | List budgets: `scope`, `project`, `amount`, `currency`, `updated_at` |
+| `POST /api/v1/budgets/set` | `scope`, `project` when `scope=project`, `amount`, optional `currency` (`EUR` only) | Create or change a budget |
+| `POST /api/v1/budgets/unset` | `scope`, `project` when `scope=project` | Remove a budget |
+| `GET /api/v1/projects` | none | List Scaleway projects with `project`, `mapping` and `in_billing` |
+| `POST /api/v1/projects/set` | `project_id`, `project` | Map a Scaleway project manually |
+| `POST /api/v1/projects/unset` | `project_id` | Return to the automatic rule |
+
+Status codes: 200 success; 400 invalid parameter (the JSON `error` field says
+which); 401 missing or wrong token; 404 unknown path, or nothing to unset; 405
+wrong method; 413 body over 16 KiB; 415 unsupported content type; 500 the
+change could not be saved (nothing changed). A write answers with the old and
+new values, a one-line `message` and a `warnings` list, for example when a
+project budget matches no Scaleway project seen in billing:
+
+```json
+{"action":"budget_set","scope":"project","project":"acme","currency":"EUR","old_amount":40,"new_amount":60,"message":"budget project acme set to 60 EUR (was 40 EUR)","warnings":[]}
+```
+
+Each change writes one log line with the action, the parameters, the old and
+new values and the client address. The token is never logged.
+
+The examples below put the token on the command line, where other local users
+can see it (`ps`) and the shell history keeps it. On a shared host, store the
+header line `Authorization: Bearer <token>` in a 0600 file and pass
+`-H @that-file` instead (curl 7.55 or later).
+
+```sh
+curl -s -H 'Authorization: Bearer <token>' http://127.0.0.1:10101/api/v1/budgets
+curl -s -X POST -H 'Authorization: Bearer <token>' \
+  'http://127.0.0.1:10101/api/v1/budgets/set?scope=total&amount=100'
+curl -s -X POST -H 'Authorization: Bearer <token>' -H 'Content-Type: application/json' \
+  -d '{"scope":"project","project":"acme","amount":"300,5"}' \
+  http://127.0.0.1:10101/api/v1/budgets/set
+curl -s -X POST -H 'Authorization: Bearer <token>' \
+  -d 'scope=project&project=acme' http://127.0.0.1:10101/api/v1/budgets/unset
+curl -s -H 'Authorization: Bearer <token>' http://127.0.0.1:10101/api/v1/projects
+curl -s -X POST -H 'Authorization: Bearer <token>' \
+  'http://127.0.0.1:10101/api/v1/projects/set?project_id=<project-id>&project=acme'
+curl -s -X POST -H 'Authorization: Bearer <token>' \
+  'http://127.0.0.1:10101/api/v1/projects/unset?project_id=<project-id>'
+```
+
 ## Target scale
 
 yagura is sized for about 200 entities per provider per instance with the
@@ -660,20 +796,26 @@ The budget on the monthly bars is an example (100): edit the thresholds of
 the "Monthly cost, all services" and "Scaleway monthly cost" panels to your
 budget, and the same value in two alert rules: `YaguraMonthlyCostOverBudget`
 (Scaleway alone) and `YaguraTotalMonthlyCostOverBudget` (Scaleway month to
-date plus one twelfth of the Gandi estimate, per yagura instance).
+date plus one twelfth of the Gandi estimate, per yagura instance). With
+budgets stored by yagura, `yagura_budget_amount` can replace these hard-coded
+values (see [Budgets and write API](#budgets-and-write-api)).
 
 ## Security model
 
 - Read-only: only `GET` requests are sent to provider APIs. A guard enforces
   this on every request. When an HTTPS proxy is configured, the transport
   opens a `CONNECT` tunnel to that proxy.
+- The optional budget write API changes only yagura's own local budget file,
+  never anything at a provider. It is off by default, listens apart from
+  `/metrics`, needs a bearer token compared in constant time, and must stay on
+  loopback or an internal network.
 - Requests go to the provider APIs you configure. By default yagura also
   requests four public status pages (no credentials, https only); disable this
   with `YAGURA_STATUSPAGE_ENABLED=false` or replace the list with
   `YAGURA_STATUSPAGE_PAGES`. Requests go through `HTTPS_PROXY` / `HTTP_PROXY`
   if the operator sets them.
 - Tokens are read from the environment or from `_FILE` files, re-read on each
-  poll, and never logged.
+  poll (the API token on each request), and never logged.
 - `/metrics`, `/healthz` and `/` are all behind the optional exporter-toolkit
   web config (TLS, basic auth). With basic auth on, a probe of `/healthz`
   needs the same credentials.

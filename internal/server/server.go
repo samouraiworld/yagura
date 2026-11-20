@@ -1,4 +1,5 @@
-// Package server exposes /metrics, /healthz and the landing page.
+// Package server exposes /metrics, /healthz and the landing page, and serves
+// other handlers on their own listener with the same timeouts.
 package server
 
 import (
@@ -6,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -79,8 +81,22 @@ func ListenAndServe(ctx context.Context, opts Options) error {
 		WebSystemdSocket:   &systemd,
 		WebConfigFile:      &opts.WebConfigFile,
 	}
+	return serve(ctx, srv, func() error { return web.ListenAndServe(srv, flags, opts.Logger) })
+}
+
+// ServeListener serves h on ln, without TLS or basic auth, until ctx is
+// done, with the same timeouts and graceful shutdown as ListenAndServe. It
+// returns nil on a clean shutdown and the serve error otherwise.
+func ServeListener(ctx context.Context, ln net.Listener, h http.Handler, logger *slog.Logger) error {
+	srv := newHTTPServer(h)
+	srv.ErrorLog = slog.NewLogLogger(logger.Handler(), slog.LevelError)
+	return serve(ctx, srv, func() error { return srv.Serve(ln) })
+}
+
+// serve runs start until it fails or ctx is done, then shuts srv down.
+func serve(ctx context.Context, srv *http.Server, start func() error) error {
 	errc := make(chan error, 1)
-	go func() { errc <- web.ListenAndServe(srv, flags, opts.Logger) }()
+	go func() { errc <- start() }()
 
 	select {
 	case err := <-errc:

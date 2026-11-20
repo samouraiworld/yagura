@@ -19,6 +19,7 @@ import (
 type deps struct {
 	logger   *slog.Logger
 	requests *prometheus.CounterVec
+	catalog  *scaleway.Catalog // filled by the Scaleway consumption poller; may be nil
 }
 
 // buildPollers returns the pollers for the enabled providers.
@@ -64,7 +65,7 @@ func buildPollers(cfg *config.Config, d deps) ([]poller.Poller, error) {
 			Requests:  d.requests,
 		})
 		logger := d.logger.With("provider", "scaleway")
-		pollers = append(pollers, scaleway.NewConsumptionPoller(client, s.OrganizationID, s.Interval, logger))
+		pollers = append(pollers, scaleway.NewConsumptionPoller(client, s.OrganizationID, s.Interval, logger, d.catalog))
 	}
 	if s := cfg.Supabase; s != nil {
 		client := httpx.New(httpx.Options{

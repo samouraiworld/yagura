@@ -5,6 +5,7 @@ package reference
 import (
 	"slices"
 
+	"github.com/samouraiworld/yagura/internal/budget"
 	"github.com/samouraiworld/yagura/internal/gandi"
 	"github.com/samouraiworld/yagura/internal/netlify"
 	"github.com/samouraiworld/yagura/internal/poller"
@@ -25,6 +26,7 @@ func MetricNames() []string {
 	names = append(names, scaleway.MetricNames...)
 	names = append(names, supabase.MetricNames...)
 	names = append(names, netlify.MetricNames...)
+	names = append(names, budget.MetricNames...)
 	slices.Sort(names)
 	return slices.Compact(names)
 }
