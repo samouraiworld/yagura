@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-22
+
 ### Added
 
 - Scaleway monthly history: `yagura_scaleway_monthly_consumption_amount{billing_period, project_id, project_name, project, category, currency}`
@@ -18,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   kept in `YAGURA_STATE_DIR/scaleway-history.json`. New settings
   `YAGURA_SCALEWAY_HISTORY_MONTHS` (default 24, 0 turns it off) and
   `YAGURA_SCALEWAY_HISTORY_INTERVAL` (default 24h).
+- An unusable `scaleway-history.json` does not stop yagura: a corrupt file
+  is renamed `scaleway-history.json.invalid-<UTC time>`, an error is logged
+  and every month is read again from the billing API; a file that cannot be
+  read at all (permissions, disk error) is left in place and the history is
+  kept in memory. A corrupt `budgets.json` still stops yagura.
 - `GET /api/v1/projects` also lists the projects seen only in the monthly
   history, with a new `in_history` field; `POST /api/v1/projects/set` and
   `unset` treat them like projects of the current month.
