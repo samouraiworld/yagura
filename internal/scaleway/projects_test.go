@@ -17,7 +17,7 @@ func TestCatalogFilledBySuccessfulPoll(t *testing.T) {
 	})
 	client := httpx.New(httpx.Options{Provider: "scaleway", BaseURL: srv.URL})
 	catalog := NewCatalog()
-	p := NewConsumptionPoller(client, tOrg, time.Hour, slog.New(slog.DiscardHandler), catalog)
+	p := NewConsumptionPoller(client, tOrg, time.Hour, slog.New(slog.DiscardHandler), catalog, nil)
 	if _, err := poll(t, p); err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestCatalogFilledBySuccessfulPoll(t *testing.T) {
 	// previous metric snapshot.
 	bad := testkit.NewServer(t, map[string]testkit.Route{pageKey("1"): {Body: `{"total_count":1}`}})
 	badClient := httpx.New(httpx.Options{Provider: "scaleway", BaseURL: bad.URL})
-	p = NewConsumptionPoller(badClient, tOrg, time.Hour, slog.New(slog.DiscardHandler), catalog)
+	p = NewConsumptionPoller(badClient, tOrg, time.Hour, slog.New(slog.DiscardHandler), catalog, nil)
 	if _, err := poll(t, p); err == nil {
 		t.Fatal("poll succeeded on a page without consumptions")
 	}
@@ -52,14 +52,18 @@ func TestCatalogSet(t *testing.T) {
 		{projectID: "a", projectName: ""},
 		{projectID: "c", projectName: ""},
 		{projectID: "c", projectName: "named"},
+		// Deleted during the month: rows with its ID as name and with its
+		// real name. The real name wins, as in the monthly history.
+		{projectID: "0000000d-0000-0000-0000-000000000004", projectName: "0000000d-0000-0000-0000-000000000004"},
+		{projectID: "0000000d-0000-0000-0000-000000000004", projectName: "Nova"},
 	})
-	want := []Project{{ID: "a"}, {ID: "b", Name: "alpha"}, {ID: "c", Name: "named"}}
+	want := []Project{{ID: "0000000d-0000-0000-0000-000000000004", Name: "Nova"}, {ID: "a"}, {ID: "b", Name: "alpha"}, {ID: "c", Name: "named"}}
 	if got := c.List(); !reflect.DeepEqual(got, want) {
 		t.Errorf("List() = %v, want %v", got, want)
 	}
 	got := c.List()
-	got[0].Name = "mutated"
-	if c.List()[0].Name != "" {
+	got[1].Name = "mutated"
+	if c.List()[1].Name != "" {
 		t.Error("List returned the internal slice")
 	}
 	var nilCatalog *Catalog

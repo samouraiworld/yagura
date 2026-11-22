@@ -97,3 +97,45 @@ func TestCollectorWithoutStoreOrProjects(t *testing.T) {
 		t.Errorf("series = %d, want 1 budget series", n)
 	}
 }
+
+func TestResolveWithHistory(t *testing.T) {
+	const deleted = "0000000d-0000-0000-0000-000000000004"
+	current := []scaleway.Project{{ID: tID1, Name: "Acme"}, {ID: deleted, Name: deleted}}
+	history := []scaleway.Project{
+		{ID: tID1, Name: "Acme"},
+		{ID: deleted, Name: deleted},
+		{ID: tID3, Name: "Orbit-old"},
+		{ID: "0000000e-0000-0000-0000-000000000005", Name: "Nova"},
+	}
+	mappings := []Mapping{
+		{ProjectID: "0000000e-0000-0000-0000-000000000005", Project: "zeta"},
+		{ProjectID: tID2, Project: "unknown"},
+	}
+	want := []Resolved{
+		{ProjectID: deleted, ProjectName: deleted, Project: deleted, Mapping: MappingAuto, InBilling: true, InHistory: true},
+		{ProjectID: tID1, ProjectName: "Acme", Project: "acme", Mapping: MappingAuto, InBilling: true, InHistory: true},
+		{ProjectID: tID3, ProjectName: "Orbit-old", Project: "orbit", Mapping: MappingAuto, InHistory: true},
+		{ProjectID: tID2, Project: "unknown", Mapping: MappingManual},
+		{ProjectID: "0000000e-0000-0000-0000-000000000005", ProjectName: "Nova", Project: "zeta", Mapping: MappingManual, InHistory: true},
+	}
+	got := ResolveWithHistory(current, history, mappings)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ResolveWithHistory =\n%+v\nwant\n%+v", got, want)
+	}
+	// A history-only project is not a project of this month's billing.
+	if HasScalewayProject(got, "orbit") {
+		t.Error("HasScalewayProject counts a history-only project")
+	}
+}
+
+func TestCollectorDeletedProjectKeepsWholeID(t *testing.T) {
+	const deleted = "0000000d-0000-0000-0000-000000000004"
+	c := NewCollector(nil, func() []scaleway.Project { return []scaleway.Project{{ID: deleted, Name: deleted}} })
+	if err := testutil.CollectAndCompare(c, strings.NewReader(`
+# HELP yagura_scaleway_project_info Business project of each Scaleway project seen in the current month's billing data, always 1; mapping is auto or manual.
+# TYPE yagura_scaleway_project_info gauge
+yagura_scaleway_project_info{mapping="auto",project="0000000d-0000-0000-0000-000000000004",project_id="0000000d-0000-0000-0000-000000000004",project_name="0000000d-0000-0000-0000-000000000004"} 1
+`)); err != nil {
+		t.Error(err)
+	}
+}

@@ -1,0 +1,42 @@
+{
+  "consumptions": [
+    {
+      "value": {
+        "currency_code": "EUR",
+        "units": 1,
+        "nanos": 500000000
+      },
+      "product_name": "demo-instance",
+      "sku": "demo/sku/1",
+      "project_id": "0000000a-0000-0000-0000-000000000001",
+      "project_name": "Tools",
+      "category_name": "Compute"
+    },
+    {
+      "value": {
+        "currency_code": "EUR",
+        "units": 0,
+        "nanos": 250000000
+      },
+      "product_name": "demo-instance",
+      "sku": "demo/sku/2",
+      "project_id": "0000000a-0000-0000-0000-000000000001",
+      "project_name": "tools-ops",
+      "category_name": "Compute"
+    },
+    {
+      "value": {
+        "currency_code": "EUR",
+        "units": 2,
+        "nanos": 0
+      },
+      "product_name": "demo-bucket",
+      "sku": "demo/sku/3",
+      "project_id": "0000000d-0000-0000-0000-000000000004",
+      "project_name": "0000000d-0000-0000-0000-000000000004",
+      "category_name": "Object Storage"
+    }
+  ],
+  "total_count": 5,
+  "updated_at": "2026-10-01T06:00:00Z"
+}

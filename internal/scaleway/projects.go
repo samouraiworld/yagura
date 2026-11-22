@@ -35,9 +35,10 @@ func (c *Catalog) List() []Project {
 }
 
 // set replaces the projects with one entry per non-empty ID of keys. When
-// an ID comes with several names (a project renamed during the month), the
-// smallest non-empty name wins, so that the choice does not depend on the
-// order of the API rows.
+// an ID comes with several names (a project renamed or deleted during the
+// month), the rule of betterName picks one, the same as the monthly history:
+// a real name beats the ID, which names a deleted project, then the smallest
+// non-empty name wins.
 func (c *Catalog) set(keys []groupKey) {
 	if c == nil {
 		return
@@ -47,8 +48,7 @@ func (c *Catalog) set(keys []groupKey) {
 		if k.projectID == "" {
 			continue
 		}
-		cur, seen := names[k.projectID]
-		if !seen || cur == "" || (k.projectName != "" && k.projectName < cur) {
+		if cur, seen := names[k.projectID]; !seen || betterName(k.projectName, cur, k.projectID) {
 			names[k.projectID] = k.projectName
 		}
 	}

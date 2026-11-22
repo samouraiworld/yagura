@@ -24,6 +24,8 @@ VictoriaMetrics setup can scrape it, graph it in Grafana and alert on it.
 - Configuration from environment variables only; secrets also accepted as files.
 - Optional monthly budgets per scope and business project, exposed as metrics
   and editable through a small authenticated write API on its own listener.
+- Scaleway monthly cost history: consumption per project and category and
+  invoiced totals for the last closed months, kept across restarts.
 - Optional TLS and basic auth through the standard exporter-toolkit web config.
 - Example Grafana dashboard and Prometheus/vmalert alert rules.
 
@@ -55,7 +57,7 @@ when its credential variable (or its `_FILE` variant) is set.
 | `YAGURA_WEB_CONFIG_FILE` | empty | exporter-toolkit web config (TLS, basic auth) |
 | `YAGURA_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `YAGURA_LOG_FORMAT` | `logfmt` | `logfmt` or `json` |
-| `YAGURA_STATE_DIR` | empty | Existing directory holding `budgets.json`; enables budgets (see [Budgets and write API](#budgets-and-write-api)) |
+| `YAGURA_STATE_DIR` | empty | Existing directory holding `budgets.json` and `scaleway-history.json`; enables budgets (see [Budgets and write API](#budgets-and-write-api)) and keeps the [Scaleway monthly history](#monthly-history) across restarts |
 | `YAGURA_BUDGET_INITIAL_TOTAL` | empty | Initial `total` budget in EUR, applied once when `budgets.json` does not exist |
 | `YAGURA_BUDGET_INITIAL_SCALEWAY` | empty | Initial `scaleway` budget in EUR, applied once when `budgets.json` does not exist |
 | `YAGURA_API_LISTEN_ADDRESS` | empty | Listen address of the budget write API; empty keeps it off |
@@ -93,6 +95,9 @@ Go runtime and process metrics are also exposed.
 | `yagura_scaleway_consumption_amount` | gauge | `project_id`, `project_name`, `category`, `currency` | Consumption month to date, as reported by the Scaleway billing API; resets on the 1st |
 | `yagura_scaleway_consumption_updated_timestamp_seconds` | gauge | none | Unix time of the billing API's last consumption update (omitted if the API does not send a valid one) |
 | `yagura_scaleway_project_info` | gauge | `project_id`, `project_name`, `project`, `mapping` | Business project of each Scaleway project seen in the current month's billing data, always 1; `mapping` is `auto` or `manual` (see [Budgets](#budgets-and-write-api)) |
+| `yagura_scaleway_monthly_consumption_amount` | gauge | `billing_period`, `project_id`, `project_name`, `project`, `category`, `currency` | Consumption of a billing period (`YYYY-MM`, UTC), excluding VAT and before discounts, for the current month and the last closed months (see [Monthly history](#monthly-history)) |
+| `yagura_scaleway_invoice_amount` | gauge | `billing_period`, `kind`, `currency` | Sum of a closed billing period's invoices: `kind="untaxed"` is `total_untaxed` (after discount), `kind="discount"` is `total_discount` (negative) |
+| `yagura_scaleway_monthly_last_success_timestamp_seconds` | gauge | `billing_period` | Unix time of the last successful read of a billing period's consumption |
 | `yagura_budget_amount` | gauge | `scope`, `project`, `currency` | Monthly budget excluding VAT stored by yagura; `scope` is `total`, `scaleway` or `project` (`project` is empty unless `scope="project"`); an unset budget has no series |
 | `yagura_supabase_project_info` | gauge | `project_ref`, `project_name`, `organization_slug`, `region` | Always 1; carries the project's name, organization and region |
 | `yagura_supabase_project_status` | gauge | `project_ref`, `status` | State set: 1 for the project's current status, 0 for every other known status; an unknown status gets its own series with 1 |
@@ -252,7 +257,8 @@ certificate expiry stays the job of
 Reads the organization's consumption for the current month through the
 Scaleway billing API (`https://api.scaleway.com`). It is enabled when
 `YAGURA_SCALEWAY_SECRET_KEY` (or `YAGURA_SCALEWAY_SECRET_KEY_FILE`) is set and
-runs one poller, `scaleway_consumption`. The API returns one row per product,
+runs the poller `scaleway_consumption`, plus `scaleway_history` for the
+[monthly history](#monthly-history). The API returns one row per product,
 resource or SKU; yagura sums them per project, category and currency, so
 products, resources and SKUs never become labels.
 
@@ -261,6 +267,8 @@ products, resources and SKUs never become labels.
 | `YAGURA_SCALEWAY_SECRET_KEY` (or `_FILE`) | empty | Secret key of an IAM application; enables the collector |
 | `YAGURA_SCALEWAY_ORGANIZATION_ID` | empty | Organization ID (UUID) whose consumption is read; required when the collector is enabled |
 | `YAGURA_SCALEWAY_INTERVAL` | `1h` | Poll interval (minimum 30s) |
+| `YAGURA_SCALEWAY_HISTORY_MONTHS` | `24` | Closed months kept in the monthly history, 0 to 60; `0` turns the history and its three metrics off |
+| `YAGURA_SCALEWAY_HISTORY_INTERVAL` | `24h` | How often each closed month and the invoice list are read again (minimum 1h) |
 
 Metrics are listed in the [metric reference](#metric-reference). The amount
 is month to date and resets on the 1st, at the first successful poll of the
@@ -286,7 +294,8 @@ separate taxes endpoint adds VAT on top of it.
 - attach a policy to the application with a single rule: the
   `BillingReadOnly` permission set, scoped to the organization ("List and read
   access to billing information"). No project permission is needed: the
-  consumption rows already carry project IDs and names;
+  consumption rows already carry project IDs and names. The same permission
+  set covers the invoice list the monthly history reads;
 - generate an API key for the application, with an expiry date; the
   `YaguraCollectorFailing` alert tells you when it has expired;
 - set `YAGURA_SCALEWAY_SECRET_KEY` to the key's *secret* key (not its access
@@ -299,7 +308,8 @@ organization. If the poller fails and `yagura_api_requests_total` shows code
 `403` for `scaleway`, check the policy and its scope.
 
 With this collector on, `/metrics` shows the organization's project names and
-IDs and what each one has cost this month. Turn on the web config (TLS, basic
+IDs and what each one has cost this month and, with the monthly history, in
+each past month of the window, with the invoiced totals and discounts. Turn on the web config (TLS, basic
 auth) or keep the port reachable only by your Prometheus server.
 
 The `YaguraMonthlyCostOverBudget` alert fires when the month-to-date total of
@@ -307,6 +317,75 @@ a currency, for one yagura instance, stays above 100 for an hour; replicas
 watching the same organization each raise it. 100 is an example: edit it in `alerts/yagura.rules.yml` to your budget. While polls
 fail, yagura keeps serving the last amount it read, so after the 1st the alert
 resolves only once a poll succeeds; `YaguraCollectorFailing` covers that case.
+
+#### Monthly history
+
+`yagura_scaleway_monthly_consumption_amount` gives the consumption of each
+billing period: the current month and the last `YAGURA_SCALEWAY_HISTORY_MONTHS`
+closed months. A billing period is a calendar month in UTC, as Scaleway
+defines it. Rows are summed per project ID, category and currency, on the same
+base as `yagura_scaleway_consumption_amount` (excluding VAT, before
+discounts). The month is in the `billing_period` label, never in the sample
+time, and the business project is in the `project` label, so no join is
+needed and past projects stay visible:
+
+```promql
+sum by (billing_period, category) (yagura_scaleway_monthly_consumption_amount{project="acme"})
+```
+
+- **Current month:** built from the `scaleway_consumption` poll, with no extra
+  API call, so it has the same values as `yagura_scaleway_consumption_amount`.
+  At the month change its series keep their labels and become a closed month,
+  which is read again at once (within 15 minutes).
+- **Closed months:** the `scaleway_history` poller reads each one with
+  `billing_period=YYYY-MM`, newest first, then lists the invoices. It checks
+  every 15 minutes what is due; a month is read again once its last success is
+  older than `YAGURA_SCALEWAY_HISTORY_INTERVAL`, or when it was last read
+  before it ended. At most `YAGURA_SCALEWAY_HISTORY_MONTHS` + 1 calls per
+  interval, plus extra pages: 25 a day by default.
+- **Invoices:** `yagura_scaleway_invoice_amount` sums `total_untaxed`
+  (`kind="untaxed"`) and `total_discount` (`kind="discount"`, negative) over
+  every invoice whose `billing_period` falls in a closed month of the window.
+  Discounts exist only per invoice, never per project. A month without an
+  invoice, such as the current month, has no invoice series.
+- **Names:** a project gets one `project_name` for every month: its name in
+  the most recent month where it has one, ignoring a name equal to the
+  project ID. The billing rows carry no rename date, so when a project has
+  two names within that month, the alphabetically smallest is used. The
+  billing API names a deleted project by its ID; a project never seen with
+  another name keeps its ID as `project_name` and `project`. `project` follows
+  the [business project rule](#business-projects) at scrape time, so a mapping
+  set through the API applies to every month at the next scrape.
+- **Errors:** an empty list (a month before the first bill) is a success
+  with no amount series. A closed month's read fails when a row has no
+  amount or currency, when the data changes between pages, or when a page is
+  empty before the announced total. Just after the month change, an answer
+  last updated before the month began is not taken as the new month. A failed read keeps the stored values (never 0), logs
+  one error line and is retried an hour later; until it succeeds the
+  `scaleway_history` poll counts as failed in `yagura_collector_up`. A month
+  never read with success has no series.
+  `yagura_scaleway_monthly_last_success_timestamp_seconds` shows when each
+  month was last read, empty months included.
+- **Storage:** with `YAGURA_STATE_DIR` set, the months, the invoice totals
+  and the last success times are saved to `scaleway-history.json` (mode 0600,
+  replaced atomically, at most 32 MiB: a larger history is kept in memory and
+  not saved, with an error). At startup the stored months are exposed at once
+  and only due months are read. An unreadable or corrupt file does not stop
+  yagura: it is renamed `scaleway-history.json.invalid-<UTC time>` and kept
+  for inspection, an error is logged, and every month is read again from the
+  billing API (delete the renamed file once checked). A file that cannot be
+  read at all (permissions, disk error) is left in place and nothing is saved
+  over it. Without
+  `YAGURA_STATE_DIR`, or when the directory is not writable (a warning is
+  logged), the history is kept in memory and read again in full after each
+  restart.
+- **Late corrections:** a month read just after it ended is read again one
+  interval later, so a correction Scaleway makes in the first days of the
+  next month shows within `YAGURA_SCALEWAY_HISTORY_INTERVAL`.
+
+Series: one per month, project, category and currency (about 25 per month on
+an organization with 20 projects, so about 650 for 25 months), 2 invoice series
+per invoiced month and 1 success series per month read.
 
 #### Bucket size and object count (Cockpit)
 
@@ -632,8 +711,10 @@ budgets cover Scaleway only.
 
 ### Storage
 
-Set `YAGURA_STATE_DIR` to an existing directory. yagura keeps one file there,
-`budgets.json` (mode 0600), and rewrites it atomically on each change (temporary
+Set `YAGURA_STATE_DIR` to an existing directory. yagura keeps the budgets
+there in `budgets.json` (mode 0600), and the
+[Scaleway monthly history](#monthly-history) in `scaleway-history.json`. It
+rewrites `budgets.json` atomically on each change (temporary
 file in the same directory, fsync, rename). On first start, when the file does
 not exist, yagura creates it with the budgets of `YAGURA_BUDGET_INITIAL_TOTAL`
 and `YAGURA_BUDGET_INITIAL_SCALEWAY` (each optional; no amount is set by
@@ -657,8 +738,10 @@ business project. The automatic rule takes the Scaleway project name, cuts it
 at the first `-`, trims it, lowercases it and replaces spaces with `-`:
 `acme-backups` and `Acme - prod` give `acme`, `Big Suite` gives `big-suite`. When the name is
 empty, or the result is not a valid project name (`^[a-z0-9][a-z0-9-]{0,62}$`,
-for example a name with an accent or `_`), the project ID is used instead. A
-manual mapping set through the API replaces the rule for one project ID.
+for example a name with an accent or `_`), the project ID is used instead.
+So is a name equal to the project ID, which is how the billing API names a
+deleted project: the ID is never cut at its first `-`. A manual mapping set
+through the API replaces the rule for one project ID.
 
 The project list comes from the billing data the Scaleway collector already
 reads: no other Scaleway call or permission is needed. A project with no
@@ -710,8 +793,8 @@ number or a string with a dot or a comma and at most two decimals (`300`,
 | `GET /api/v1/budgets` | none | List budgets: `scope`, `project`, `amount`, `currency`, `updated_at` |
 | `POST /api/v1/budgets/set` | `scope`, `project` when `scope=project`, `amount`, optional `currency` (`EUR` only) | Create or change a budget |
 | `POST /api/v1/budgets/unset` | `scope`, `project` when `scope=project` | Remove a budget |
-| `GET /api/v1/projects` | none | List Scaleway projects with `project`, `mapping` and `in_billing` |
-| `POST /api/v1/projects/set` | `project_id`, `project` | Map a Scaleway project manually |
+| `GET /api/v1/projects` | none | List Scaleway projects with `project`, `mapping`, `in_billing` (in the current month's billing) and `in_history` (in the [monthly history](#monthly-history)) |
+| `POST /api/v1/projects/set` | `project_id`, `project` | Map a Scaleway project manually, also one seen only in the monthly history |
 | `POST /api/v1/projects/unset` | `project_id` | Return to the automatic rule |
 
 Status codes: 200 success; 400 invalid parameter (the JSON `error` field says
@@ -806,7 +889,9 @@ values (see [Budgets and write API](#budgets-and-write-api)).
   this on every request. When an HTTPS proxy is configured, the transport
   opens a `CONNECT` tunnel to that proxy.
 - The optional budget write API changes only yagura's own local budget file,
-  never anything at a provider. It is off by default, listens apart from
+  never anything at a provider. With `YAGURA_STATE_DIR` set and the Scaleway
+  collector on, the monthly billing history is also stored there
+  (`scaleway-history.json`, mode 0600). It is off by default, listens apart from
   `/metrics`, needs a bearer token compared in constant time, and must stay on
   loopback or an internal network.
 - Requests go to the provider APIs you configure. By default yagura also

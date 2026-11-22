@@ -37,32 +37,56 @@ type Resolved struct {
 	ProjectName string `json:"project_name"`
 	Project     string `json:"project"`
 	Mapping     string `json:"mapping"`
-	// InBilling is false for a manual mapping whose project has no
-	// consumption in the current month.
+	// InBilling is false for a project with no consumption in the current
+	// month: a manual mapping of an unseen project, or a project seen only
+	// in the monthly history.
 	InBilling bool `json:"in_billing"`
+	// InHistory is true for a project of the stored monthly history, the
+	// current month included.
+	InHistory bool `json:"in_history"`
 }
 
 // Resolve applies the manual mappings, then the automatic rule, to the
-// projects seen in billing. Manual mappings of unseen projects are listed
-// too, with InBilling false. The result is sorted by business project, then
-// project ID.
+// projects seen in the current month's billing. Manual mappings of unseen
+// projects are listed too, with InBilling false. The result is sorted by
+// business project, then project ID.
 func Resolve(projects []scaleway.Project, mappings []Mapping) []Resolved {
+	return ResolveWithHistory(projects, nil, mappings)
+}
+
+// ResolveWithHistory is Resolve with the projects of the monthly history:
+// a history project absent from current is listed with InBilling false and
+// its history name.
+func ResolveWithHistory(current, history []scaleway.Project, mappings []Mapping) []Resolved {
 	manual := make(map[string]string, len(mappings))
 	for _, m := range mappings {
 		manual[m.ProjectID] = m.Project
 	}
-	out := make([]Resolved, 0, len(projects)+len(mappings))
-	seen := make(map[string]bool, len(projects))
-	for _, p := range projects {
+	inHistory := make(map[string]bool, len(history))
+	for _, p := range history {
+		inHistory[strings.ToLower(p.ID)] = true
+	}
+	out := make([]Resolved, 0, len(current)+len(history)+len(mappings))
+	seen := make(map[string]bool, len(current)+len(history))
+	add := func(p scaleway.Project, inBilling bool) {
 		id := strings.ToLower(p.ID)
+		if seen[id] {
+			return
+		}
 		seen[id] = true
-		r := Resolved{ProjectID: p.ID, ProjectName: p.Name, InBilling: true}
+		r := Resolved{ProjectID: p.ID, ProjectName: p.Name, InBilling: inBilling, InHistory: inHistory[id]}
 		if m, ok := manual[id]; ok {
 			r.Project, r.Mapping = m, MappingManual
 		} else {
 			r.Project, r.Mapping = AutoProject(p.Name, id), MappingAuto
 		}
 		out = append(out, r)
+	}
+	for _, p := range current {
+		add(p, true)
+	}
+	for _, p := range history {
+		add(p, false)
 	}
 	for _, m := range mappings {
 		if !seen[m.ProjectID] {

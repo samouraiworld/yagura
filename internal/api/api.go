@@ -28,6 +28,9 @@ type Options struct {
 	// Projects lists the Scaleway projects seen in billing; nil when the
 	// Scaleway collector is off.
 	Projects func() []scaleway.Project
+	// History lists the Scaleway projects of the monthly history, with the
+	// name its metrics use; nil when the history is off.
+	History func() []scaleway.Project
 	// Token returns the expected bearer token; it is called on every
 	// request so that a rotated token file is picked up.
 	Token  func() (string, error)
@@ -182,8 +185,15 @@ func (h *handler) projects() []scaleway.Project {
 	return h.Projects()
 }
 
+func (h *handler) history() []scaleway.Project {
+	if h.History == nil {
+		return nil
+	}
+	return h.History()
+}
+
 func (h *handler) resolved() []budget.Resolved {
-	return budget.Resolve(h.projects(), h.Store.Mappings())
+	return budget.ResolveWithHistory(h.projects(), h.history(), h.Store.Mappings())
 }
 
 func formatAmount(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
@@ -309,14 +319,20 @@ type mappingChange struct {
 	Warnings    []string `json:"warnings"`
 }
 
-// billingProject returns the project seen in billing with this ID.
-func (h *handler) billingProject(id string) (scaleway.Project, bool) {
+// knownProject returns the project with this ID seen in the current month's
+// billing, else in the monthly history. inBilling tells which.
+func (h *handler) knownProject(id string) (p scaleway.Project, known, inBilling bool) {
 	for _, p := range h.projects() {
 		if strings.ToLower(p.ID) == id {
-			return p, true
+			return p, true, true
 		}
 	}
-	return scaleway.Project{}, false
+	for _, p := range h.history() {
+		if strings.ToLower(p.ID) == id {
+			return p, true, false
+		}
+	}
+	return scaleway.Project{}, false, false
 }
 
 func ptr[T any](v T) *T { return &v }
@@ -356,15 +372,17 @@ func (h *handler) setProject(w http.ResponseWriter, r *http.Request) {
 	}
 	c := mappingChange{Action: "project_set", ProjectID: cur.ProjectID, Warnings: []string{},
 		NewProject: ptr(cur.Project), NewMapping: ptr(budget.MappingManual)}
-	billed, inBilling := h.billingProject(cur.ProjectID)
-	c.ProjectName = billed.Name
+	// A project of the monthly history counts as known: its mapping applies
+	// to its past months at once.
+	seen, known, _ := h.knownProject(cur.ProjectID)
+	c.ProjectName = seen.Name
 	switch {
 	case old != nil:
 		c.OldProject, c.OldMapping = ptr(old.Project), ptr(budget.MappingManual)
-	case inBilling:
-		c.OldProject, c.OldMapping = ptr(budget.AutoProject(billed.Name, cur.ProjectID)), ptr(budget.MappingAuto)
+	case known:
+		c.OldProject, c.OldMapping = ptr(budget.AutoProject(seen.Name, cur.ProjectID)), ptr(budget.MappingAuto)
 	}
-	if !inBilling {
+	if !known {
 		c.Warnings = append(c.Warnings, "this project_id is not in this month's Scaleway billing data; the mapping applies once it appears")
 	}
 	c.describe()
@@ -388,9 +406,9 @@ func (h *handler) unsetProject(w http.ResponseWriter, r *http.Request) {
 	}
 	c := mappingChange{Action: "project_unset", ProjectID: old.ProjectID, Warnings: []string{},
 		OldProject: ptr(old.Project), OldMapping: ptr(budget.MappingManual)}
-	if billed, ok := h.billingProject(old.ProjectID); ok {
-		c.ProjectName = billed.Name
-		c.NewProject, c.NewMapping = ptr(budget.AutoProject(billed.Name, old.ProjectID)), ptr(budget.MappingAuto)
+	if seen, known, _ := h.knownProject(old.ProjectID); known {
+		c.ProjectName = seen.Name
+		c.NewProject, c.NewMapping = ptr(budget.AutoProject(seen.Name, old.ProjectID)), ptr(budget.MappingAuto)
 	}
 	c.describe()
 	h.logMapping(r, c)
